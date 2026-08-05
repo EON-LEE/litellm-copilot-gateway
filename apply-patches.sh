@@ -18,7 +18,8 @@ fi
 if grep -q "max_attempts = 120" "$AUTH"; then
   echo "Patch 1 already applied."
 elif grep -q "max_attempts = 12 " "$AUTH" || grep -q "max_attempts = 12$" "$AUTH" || grep -qE "max_attempts = 12\b" "$AUTH"; then
-  sed -i '' -E 's/max_attempts = 12[[:space:]]*#.*/max_attempts = 120  # PATCHED: 10 minutes (was 12 = 1 minute)/' "$AUTH"
+  if sed --version >/dev/null 2>&1; then SEDI=(sed -i); else SEDI=(sed -i ''); fi   # GNU vs BSD
+  "${SEDI[@]}" -E 's/max_attempts = 12[[:space:]]*#.*/max_attempts = 120  # PATCHED: 10 minutes (was 12 = 1 minute)/' "$AUTH"
   grep -q "max_attempts = 120" "$AUTH" && echo "Patch 1 applied (device-login window -> 10min)." || { echo "ERROR: patch 1 failed"; exit 1; }
 else
   echo "WARNING: expected 'max_attempts = 12' not found — upstream may have changed; inspect $AUTH manually." >&2
