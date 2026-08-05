@@ -74,6 +74,23 @@ Claude Code ──/v1/messages──▶ litellm :4000 (127.0.0.1, 인증: .env�
 ~/litellm-copilot/claude-copilot.sh --model gpt-5.5   # 모델 지정
 ```
 
+### 셸 알리아스 (선택)
+
+`~/.zshrc`(macOS) 또는 `~/.bash_aliases`(Linux/WSL)에 추가:
+
+```bash
+# litellm-copilot gateway
+alias claude-copilot="$HOME/litellm-copilot/claude-copilot.sh"
+alias ccp="$HOME/litellm-copilot/claude-copilot.sh"
+alias copilot-start="$HOME/litellm-copilot/start-proxy.sh"
+alias copilot-stop="$HOME/litellm-copilot/stop-proxy.sh"
+alias copilot-restart="$HOME/litellm-copilot/restart-proxy.sh"
+alias copilot-models="$HOME/litellm-copilot/list-models.sh"
+alias copilot-refresh="$HOME/litellm-copilot/refresh-models.sh && $HOME/litellm-copilot/restart-proxy.sh"
+```
+
+적용: `source ~/.bash_aliases` (또는 새 셸) 후 `ccp`로 바로 실행.
+
 - 세션 안: `/model`로 전환 (피커의 `claude-gpt-...` 별칭 = 해당 GPT 모델)
 - 평소 `claude` 명령(진짜 Anthropic)은 영향 없음 — 환경변수는 이 스크립트의 자식 프로세스에만 적용
 - 기본값: main=`claude-sonnet-5`, opus=`claude-opus-5`, haiku/small-fast=`gpt-4o-mini`
