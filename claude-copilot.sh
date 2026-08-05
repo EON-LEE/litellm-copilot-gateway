@@ -3,11 +3,11 @@
 # Your normal `claude` (real Anthropic) is unaffected — env vars are set only
 # for this child process.
 #
-#   ~/litellm-copilot/claude-copilot.sh                    # default: claude-sonnet-5
-#   ~/litellm-copilot/claude-copilot.sh --model gpt-5.5    # any Copilot model
+#   ~/litellm-copilot-gateway/claude-copilot.sh                    # default: claude-sonnet-5
+#   ~/litellm-copilot-gateway/claude-copilot.sh --model gpt-5.5    # any Copilot model
 #   inside a session: /model  (aliases claude-gpt-... are the same gpt models)
 set -euo pipefail
-DIR="$HOME/litellm-copilot"
+DIR="$HOME/litellm-copilot-gateway"
 # shellcheck disable=SC1091
 source "$DIR/.env"
 

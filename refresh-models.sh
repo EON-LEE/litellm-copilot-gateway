@@ -14,10 +14,10 @@
 # /model gateway discovery only lists ids starting with claude/anthropic.
 #
 # Fail-closed: never overwrites config.yaml unless a plausible model list was fetched.
-# Re-run whenever Copilot ships new models, then: ~/litellm-copilot/restart-proxy.sh
+# Re-run whenever Copilot ships new models, then: ~/litellm-copilot-gateway/restart-proxy.sh
 set -euo pipefail
 
-DIR="$HOME/litellm-copilot"
+DIR="$HOME/litellm-copilot-gateway"
 CFG="$DIR/config.yaml"
 CRED="$HOME/.config/litellm/github_copilot"
 
@@ -124,4 +124,4 @@ emit_entry_1m() { # $1=model_name  $2=route  $3=upstream id
 mv "$TMP" "$CFG"
 trap - EXIT
 echo "Wrote $CFG ($COUNT chat models; previous saved as config.yaml.bak)."
-echo "Apply with: ~/litellm-copilot/restart-proxy.sh"
+echo "Apply with: ~/litellm-copilot-gateway/restart-proxy.sh"

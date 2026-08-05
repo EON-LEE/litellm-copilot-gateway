@@ -5,7 +5,7 @@
 # Idempotent: skips anything already listening. Logs: copilot-api.log / proxy.log
 set -euo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
-DIR="$HOME/litellm-copilot"
+DIR="$HOME/litellm-copilot-gateway"
 # shellcheck disable=SC1091
 source "$DIR/.env"    # LITELLM_MASTER_KEY
 export LITELLM_MASTER_KEY

@@ -14,8 +14,8 @@ GitHub Copilot 구독의 모델들(Claude, GPT-5.x, Gemini, Grok)을 Claude Code
 
 ### 1. 이 저장소 클론
 ```bash
-git clone <이 저장소 URL> ~/litellm-copilot
-cd ~/litellm-copilot
+git clone <이 저장소 URL> ~/litellm-copilot-gateway
+cd ~/litellm-copilot-gateway
 ```
 
 ### 2. litellm 설치 (fastapi 버전 고정 필수 — "litellm 업그레이드 시" 섹션 참고)
@@ -69,9 +69,9 @@ Claude Code ──/v1/messages──▶ litellm :4000 (127.0.0.1, 인증: .env�
 ## 사용법
 
 ```bash
-~/litellm-copilot/start-proxy.sh        # 스택 기동 (이미 떠있으면 스킵)
-~/litellm-copilot/claude-copilot.sh     # Copilot 백엔드로 Claude Code 실행
-~/litellm-copilot/claude-copilot.sh --model gpt-5.5   # 모델 지정
+~/litellm-copilot-gateway/start-proxy.sh        # 스택 기동 (이미 떠있으면 스킵)
+~/litellm-copilot-gateway/claude-copilot.sh     # Copilot 백엔드로 Claude Code 실행
+~/litellm-copilot-gateway/claude-copilot.sh --model gpt-5.5   # 모델 지정
 ```
 
 ### 셸 알리아스 (선택)
@@ -79,14 +79,14 @@ Claude Code ──/v1/messages──▶ litellm :4000 (127.0.0.1, 인증: .env�
 `~/.zshrc`(macOS) 또는 `~/.bash_aliases`(Linux/WSL)에 추가:
 
 ```bash
-# litellm-copilot gateway
-alias claude-copilot="$HOME/litellm-copilot/claude-copilot.sh"
-alias ccp="$HOME/litellm-copilot/claude-copilot.sh"
-alias copilot-start="$HOME/litellm-copilot/start-proxy.sh"
-alias copilot-stop="$HOME/litellm-copilot/stop-proxy.sh"
-alias copilot-restart="$HOME/litellm-copilot/restart-proxy.sh"
-alias copilot-models="$HOME/litellm-copilot/list-models.sh"
-alias copilot-refresh="$HOME/litellm-copilot/refresh-models.sh && $HOME/litellm-copilot/restart-proxy.sh"
+# litellm-copilot-gateway
+alias claude-copilot="$HOME/litellm-copilot-gateway/claude-copilot.sh"
+alias ccp="$HOME/litellm-copilot-gateway/claude-copilot.sh"
+alias copilot-start="$HOME/litellm-copilot-gateway/start-proxy.sh"
+alias copilot-stop="$HOME/litellm-copilot-gateway/stop-proxy.sh"
+alias copilot-restart="$HOME/litellm-copilot-gateway/restart-proxy.sh"
+alias copilot-models="$HOME/litellm-copilot-gateway/list-models.sh"
+alias copilot-refresh="$HOME/litellm-copilot-gateway/refresh-models.sh && $HOME/litellm-copilot-gateway/restart-proxy.sh"
 ```
 
 적용: `source ~/.bash_aliases` (또는 새 셸) 후 `ccp`로 바로 실행.
@@ -110,7 +110,7 @@ alias copilot-refresh="$HOME/litellm-copilot/refresh-models.sh && $HOME/litellm-
 ## 새 모델이 나오면
 
 ```bash
-~/litellm-copilot/refresh-models.sh && ~/litellm-copilot/restart-proxy.sh
+~/litellm-copilot-gateway/refresh-models.sh && ~/litellm-copilot-gateway/restart-proxy.sh
 ```
 목록에 없어도 와일드카드(`github_copilot/*`)가 chat 호환 모델은 즉시 처리함.
 
@@ -118,8 +118,8 @@ alias copilot-refresh="$HOME/litellm-copilot/refresh-models.sh && $HOME/litellm-
 
 ```bash
 uv tool install --python 3.13 'litellm[proxy]==<ver>' --with 'fastapi==0.140.6'
-~/litellm-copilot/apply-patches.sh     # 패치 재적용 필수
-~/litellm-copilot/restart-proxy.sh
+~/litellm-copilot-gateway/apply-patches.sh     # 패치 재적용 필수
+~/litellm-copilot-gateway/restart-proxy.sh
 ```
 fastapi 핀은 litellm#35763 (PR #35389/#35139/#35773/#35858 중 하나) 머지 후 제거 가능.
 
@@ -150,5 +150,5 @@ fastapi 핀은 litellm#35763 (PR #35389/#35139/#35773/#35858 중 하나) 머지 
 
 - `~/.config/litellm/github_copilot/access-token` — 장수명 GitHub OAuth 토큰 (600)
 - `~/.config/litellm/github_copilot/api-key.json` — 단수명(~25분) Copilot 베어러, 자동 갱신 (600)
-- `~/litellm-copilot/.env` — litellm 마스터키 (600, 랜덤 생성)
+- `~/litellm-copilot-gateway/.env` — litellm 마스터키 (600, 랜덤 생성)
 - copilot-api는 같은 GitHub 토큰을 재사용 (별도 인증 불필요)
