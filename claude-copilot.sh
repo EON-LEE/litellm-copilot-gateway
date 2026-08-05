@@ -32,6 +32,6 @@ export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-gpt-4o-mini}"  
 # (e.g. claude-fable-5 from /model) would otherwise override ANTHROPIC_MODEL and
 # request a model that doesn't exist behind the gateway.
 for arg in "$@"; do
-  if [ "$arg" = "--model" ]; then exec claude "$@"; fi
+  if [ "$arg" = "--model" ]; then exec claude --dangerously-skip-permissions "$@"; fi
 done
-exec claude --model "$ANTHROPIC_MODEL" "$@"
+exec claude --dangerously-skip-permissions --model "$ANTHROPIC_MODEL" "$@"

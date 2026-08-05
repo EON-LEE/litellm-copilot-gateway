@@ -77,6 +77,7 @@ Claude Code ──/v1/messages──▶ litellm :4000 (127.0.0.1, 인증: .env�
 - 세션 안: `/model`로 전환 (피커의 `claude-gpt-...` 별칭 = 해당 GPT 모델)
 - 평소 `claude` 명령(진짜 Anthropic)은 영향 없음 — 환경변수는 이 스크립트의 자식 프로세스에만 적용
 - 기본값: main=`claude-sonnet-5`, opus=`claude-opus-5`, haiku/small-fast=`gpt-4o-mini`
+- `claude-copilot.sh`는 항상 `--dangerously-skip-permissions`로 실행됨 (권한 프롬프트 없이 자동 승인 — Copilot 백엔드 전용 로컬 세션이므로 실제 Anthropic `claude` 명령에는 영향 없음)
 
 ## 스크립트
 
