@@ -21,7 +21,7 @@ cd ~/litellm-copilot-gateway
 ### 2. litellm 설치 (fastapi 버전 고정 필수 — "litellm 업그레이드 시" 섹션 참고)
 ```bash
 uv tool install --python 3.13 'litellm[proxy]==1.95.0' --with 'fastapi==0.140.6'
-./apply-patches.sh     # device-login 폴링 창 1분 → 10분 패치
+./apply-patches.sh     # 로컬 패치 3종 적용 (device-login 창, tool_choice, SSE 스트리밍 — "스크립트" 표 참고)
 ```
 
 ### 3. 마스터 키 생성 (`.env`, git에 커밋되지 않음)
@@ -56,8 +56,9 @@ Claude Code ──/v1/messages──▶ litellm :4000 (127.0.0.1, 인증: .env�
                                 ├─ claude-* ──────────────┐
                                 ├─ responses 전용(gpt-5.x, │   anthropic/<id>
                                 │   codex, grok, mai) ────┤──▶ copilot-api :4141
-                                │                          │      ├─ claude-* → Copilot 네이티브 /v1/messages (thinking 보존)
-                                │                          │      └─ 그 외    → Copilot /responses (자동 번역)
+                                ├─ gpt-4o-mini,           │      ├─ claude-* → Copilot 네이티브 /v1/messages (thinking 보존)
+                                │   haiku 별칭 ───────────┘      ├─ web_search 단독 요청 → GPT /responses 재라우팅 (실검색)
+                                │                                └─ 그 외    → Copilot /responses (자동 번역)
                                 └─ 일반 chat 모델(gemini,
                                     gpt-4o/4.1/3.5) ──────▶ github_copilot provider → Copilot /chat/completions
 ```
@@ -93,7 +94,7 @@ alias copilot-refresh="$HOME/litellm-copilot-gateway/refresh-models.sh && $HOME/
 
 - 세션 안: `/model`로 전환 (피커의 `claude-gpt-...` 별칭 = 해당 GPT 모델)
 - 평소 `claude` 명령(진짜 Anthropic)은 영향 없음 — 환경변수는 이 스크립트의 자식 프로세스에만 적용
-- 기본값: main=`claude-sonnet-5`, opus=`claude-opus-5`, haiku/small-fast=`gpt-4o-mini`
+- 기본값: main=`claude-sonnet-5`, opus=`claude-opus-5`, haiku/small-fast=`gpt-5-mini` (gpt-4o-mini는 Copilot 카탈로그에서 빠진 레거시 ID — 텍스트는 되지만 이미지 요청이 업스트림 400이라 승격함. gpt-5-mini는 비전·웹서치·스트리밍 모두 정상)
 - `claude-copilot.sh`는 항상 `--dangerously-skip-permissions`로 실행됨 (권한 프롬프트 없이 자동 승인 — Copilot 백엔드 전용 로컬 세션이므로 실제 Anthropic `claude` 명령에는 영향 없음)
 
 ## 스크립트
@@ -105,7 +106,7 @@ alias copilot-refresh="$HOME/litellm-copilot-gateway/refresh-models.sh && $HOME/
 | `claude-copilot.sh` | Claude Code 런처 (게이트웨이 자동 기동 포함) |
 | `refresh-models.sh` | Copilot 실시간 목록으로 config.yaml 재생성 (fail-closed, 백업 후 원자적 교체) |
 | `list-models.sh` | 현재 Copilot 모델 + 엔드포인트 + 컨텍스트 크기 조회 |
-| `apply-patches.sh` | litellm 업그레이드 후 로컬 패치 재적용 (device-login 창 1분→10분) |
+| `apply-patches.sh` | litellm 업그레이드 후 로컬 패치 재적용 (Patch 1: device-login 창 1분→10분, Patch 2: 빈 tools에 남은 tool_choice 제거, Patch 3a/3b: SSE 스트리밍 빈 choices 청크 가드) |
 
 ## 새 모델이 나오면
 
@@ -123,12 +124,36 @@ uv tool install --python 3.13 'litellm[proxy]==<ver>' --with 'fastapi==0.140.6'
 ```
 fastapi 핀은 litellm#35763 (PR #35389/#35139/#35773/#35858 중 하나) 머지 후 제거 가능.
 
+## WebSearch 동작 방식 (2026-08 검증)
+
+Claude Code의 WebSearch는 Anthropic 서버가 실행하는 서버사이드 툴(`web_search_20250305`)이라 Copilot 백엔드로는 원래 불가능하지만, **copilot-api에 내장된 `messageApiWebSearchModel` 기능**(기본값 `gpt-5-mini`, config 불필요)이 이를 해결한다: web_search가 유일한 툴인 `/v1/messages` 요청을 감지하면 Responses 지원 GPT 모델의 Copilot `/responses`로 재라우팅하고, OpenAI의 네이티브 hosted `web_search` 툴(서버사이드 실검색, 외부 검색 API 키 불필요)을 실행한 뒤 결과를 Anthropic 네이티브 포맷(`server_tool_use` + `web_search_tool_result`)으로 재구성해 돌려준다. 스트리밍 포함 동작 검증 완료.
+
+**단, 요청이 copilot-api(:4141)를 거쳐야만 동작한다.** litellm의 github_copilot 직결 경로는 이 툴 형태를 번역하지 못해 400("tools are required when tool choice is specified")이 나므로, WebSearch가 흘러가는 small/fast 모델(`gpt-4o-mini`, haiku 별칭)은 반드시 capi 라우팅을 유지할 것 (`refresh-models.sh`가 처리).
+
 ## 알려진 제약
 
+- **web_fetch 서버 툴**(`web_fetch_20250910`): 게이트웨이 전체에서 불가 — claude-* 경로는 Copilot이 400("rejected tool(s): web_fetch"), GPT 경로는 copilot-api 크래시(500). 단 Claude Code의 WebFetch 툴은 CLI가 직접 URL을 가져오는 클라이언트 실행 방식이라 실사용 영향 없음.
+- **web_search + 다른 툴 혼합 요청**: copilot-api가 web_search를 조용히 제거(검색 미실행, 에러는 없음). Claude Code는 웹서치를 단독 요청으로 보내므로 실사용 무관. 혼합 + tool_choice로 web_search 강제 시엔 400.
+- **count_tokens**: 로컬 근사치 — tools 배열은 토큰 계산에서 무시되므로 툴 많은 요청은 과소집계. Claude Code의 컨텍스트 추적 용도로는 충분.
+- **github_copilot 직결 경로 usage**: input_tokens가 실제보다 크게 과소보고됨 (~1700토큰 프롬프트가 17로 찍힘) — 이 경로 모델들의 비용 집계는 신뢰 불가.
+- **동시 요청 응답 혼선(1회 관측)**: 병렬 부하 중 opus 요청에 sonnet 응답이 온 사례 1회. 재현 안 됨. 여러 세션 동시 사용 중 엉뚱한 응답이 오면 이걸 의심할 것.
 - **grok-4.5**: tools 없는 bare 요청은 copilot-api 버그(tool_choice without tools)로 400. Claude Code는 항상 tools를 보내므로 실사용 무관.
 - **mai-code-1-flash**: Copilot 쪽에서 완전히 죽어있음(양쪽 400). `mai-code-1-flash-picker`를 쓸 것 (config에서 bare 이름은 제외됨).
 - **litellm github_copilot 네이티브 /v1/messages 경로**: "unknown Copilot-Integration-Id"로 깨져 있어(1.95.0) claude-*는 copilot-api 경유로 우회 중. 업스트림 수정 시 단순화 가능.
 - **ToS**: 에디터 외부에서 Copilot API 사용은 GitHub 비공식 영역. 개인·로컬·수동 규모에선 관찰된 최악 사례가 "경고 메일 → Copilot 일시정지" 수준이지만, 대량/병렬 트래픽·외부 공유는 위험 가중. 로컬 단독 사용 유지 권장.
+
+## 기능 검증 현황 (2026-08-05, 33개 테스트)
+
+| 기능 | 상태 |
+|---|---|
+| 스트리밍 (SSE) | ✅ 전 라우트 (Patch 3a/3b 적용 후) |
+| 툴콜 왕복 / 멀티툴 / 병렬 툴콜 | ✅ 전 라우트 |
+| WebSearch (실검색) | ✅ capi 경로, 스트리밍 포함 |
+| Extended thinking / interleaved | ✅ (budget_tokens는 Copilot adaptive로 변환 — 쉬운 질문엔 생각 생략, 정상) |
+| 비전 (이미지 입력) | ✅ claude-*/gpt-5-mini/gemini (gpt-4o·gpt-4o-mini는 업스트림 카탈로그 제외로 불가) |
+| 프롬프트 캐싱 | ✅ claude-* 실캐싱 (write→hit→증분), 기타 경로는 무해하게 수용/제거 |
+| count_tokens, [1m] 변형, stop_sequences, metadata | ✅ |
+| web_fetch 서버 툴 | ❌ (위 "알려진 제약" 참고, 실사용 영향 없음) |
 
 ## 재로그인이 필요한가?
 
