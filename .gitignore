@@ -1,0 +1,10 @@
+# Secrets — never commit
+.env
+
+# Auto-generated / environment-specific (regenerate with refresh-models.sh)
+config.yaml
+config.yaml.bak
+.config.yaml.*
+
+# Runtime logs
+*.log
