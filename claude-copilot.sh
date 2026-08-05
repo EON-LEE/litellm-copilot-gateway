@@ -25,8 +25,12 @@ export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-claude-opus-5}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-sonnet-5}"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-gpt-4o-mini}"
-export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-gpt-4o-mini}"   # older CC versions
+# gpt-5-mini, not gpt-4o-mini: gpt-5-mini is in Copilot's current model catalog with
+# vision registered (gpt-4o-mini images 400 upstream: "image media type not supported"),
+# routes via copilot-api /responses (streams correctly), and is copilot-api's default
+# messageApiWebSearchModel so WebSearch requests stay on the same model.
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-gpt-5-mini}"
+export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-gpt-5-mini}"   # older CC versions
 
 # Force the model unless the caller passed --model: a user's saved default model
 # (e.g. claude-fable-5 from /model) would otherwise override ANTHROPIC_MODEL and

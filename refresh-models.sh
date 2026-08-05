@@ -88,6 +88,18 @@ emit_entry_1m() { # $1=model_name  $2=route  $3=upstream id
     elif [[ ",$endpoints," == *",/responses,"* ]] || [[ ",$endpoints," == *",ws:/responses,"* ]]; then
       emit_entry "$id" capi "$id"
       emit_entry_1m "claude-$id" capi "$id"          # picker-visible alias
+    elif [[ "$id" == "gpt-4o-mini" ]]; then
+      # capi (copilot-api :4141), not the litellm-direct "copilot" route: this is
+      # ANTHROPIC_SMALL_FAST_MODEL/ANTHROPIC_DEFAULT_HAIKU_MODEL (claude-copilot.sh),
+      # which Claude Code also uses for its native WebSearch tool. litellm's direct
+      # github_copilot provider can't translate WebSearch's server-side tool_choice
+      # (400: "tools are required when tool choice is specified") — copilot-api's
+      # /v1/messages endpoint has built-in web_search handling (messageApiWebSearchModel,
+      # default gpt-5-mini via /responses) that transparently returns real results in
+      # native Anthropic server_tool_use/web_search_tool_result format. Verified working
+      # 2026-08-05 by curling :4141 directly.
+      emit_entry "$id" capi "$id"
+      emit_entry_1m "claude-$id" capi "$id"
     else
       emit_entry "$id" copilot "$id"
       emit_entry_1m "claude-$id" copilot "$id"       # picker-visible alias
@@ -104,8 +116,10 @@ emit_entry_1m() { # $1=model_name  $2=route  $3=upstream id
   emit_entry_1m "claude-opus-4-1"           capi    "claude-opus-4.6"
   emit_entry_1m "claude-sonnet-4-5"         capi    "claude-sonnet-4.6"
   emit_entry_1m "claude-sonnet-4-6"         capi    "claude-sonnet-4.6"
-  emit_entry_1m "claude-haiku-4-5"          copilot "gpt-4o-mini"
-  emit_entry_1m "claude-3-5-haiku-20241022" copilot "gpt-4o-mini"
+  # haiku aliases -> gpt-5-mini (in the current Copilot catalog with vision;
+  # gpt-4o-mini is a legacy id whose image requests 400 upstream)
+  emit_entry_1m "claude-haiku-4-5"          capi    "gpt-5-mini"
+  emit_entry_1m "claude-3-5-haiku-20241022" capi    "gpt-5-mini"
 
   # wildcard fallback: any unknown name -> plain Copilot chat route
   echo '  - model_name: "*"'
