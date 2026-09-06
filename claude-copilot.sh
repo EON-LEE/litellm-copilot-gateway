@@ -11,10 +11,21 @@ DIR="$HOME/litellm-copilot-gateway"
 # shellcheck disable=SC1091
 source "$DIR/.env"
 
-if ! curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models \
-     -H "Authorization: Bearer $LITELLM_MASTER_KEY" >/dev/null 2>&1; then
-  echo "⚠️  Gateway not reachable on :4000 — starting it..." >&2
-  "$DIR/start-proxy.sh" >&2
+# Always pull the latest Copilot model catalog before launching, so new
+# releases (e.g. a new GPT/Claude model on Copilot) show up without a manual
+# refresh step. refresh-models.sh is fail-closed (won't touch config.yaml on
+# a bad/short response), so a network hiccup here just falls back to the
+# existing config instead of blocking the launch.
+echo "🔄 Refreshing Copilot model catalog..." >&2
+if "$DIR/refresh-models.sh" >&2; then
+  "$DIR/restart-proxy.sh" >&2
+else
+  echo "⚠️  Model refresh failed — continuing with existing config.yaml" >&2
+  if ! curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models \
+       -H "Authorization: Bearer $LITELLM_MASTER_KEY" >/dev/null 2>&1; then
+    echo "⚠️  Gateway not reachable on :4000 — starting it..." >&2
+    "$DIR/start-proxy.sh" >&2
+  fi
 fi
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:4000"

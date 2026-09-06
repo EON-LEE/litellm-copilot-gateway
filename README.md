@@ -103,17 +103,19 @@ alias copilot-refresh="$HOME/litellm-copilot-gateway/refresh-models.sh && $HOME/
 |---|---|
 | `start-proxy.sh` | copilot-api(:4141) + litellm(:4000) 기동, 둘 다 127.0.0.1 전용 |
 | `stop-proxy.sh` / `restart-proxy.sh` | 정지 / litellm만 재시작(설정 리로드) |
-| `claude-copilot.sh` | Claude Code 런처 (게이트웨이 자동 기동 포함) |
+| `claude-copilot.sh` | Claude Code 런처 (게이트웨이 자동 기동 + 실행마다 모델 목록 자동 refresh 포함) |
 | `refresh-models.sh` | Copilot 실시간 목록으로 config.yaml 재생성 (fail-closed, 백업 후 원자적 교체) |
 | `list-models.sh` | 현재 Copilot 모델 + 엔드포인트 + 컨텍스트 크기 조회 |
 | `apply-patches.sh` | litellm 업그레이드 후 로컬 패치 재적용 (Patch 1: device-login 창 1분→10분, Patch 2: 빈 tools에 남은 tool_choice 제거, Patch 3a/3b: SSE 스트리밍 빈 choices 청크 가드) |
 
 ## 새 모델이 나오면
 
+`claude-copilot.sh`(`ccp`)는 실행할 때마다 자동으로 아래를 먼저 돌리므로, 평소엔 아무것도 안 해도 새 모델이 반영된다:
+
 ```bash
 ~/litellm-copilot-gateway/refresh-models.sh && ~/litellm-copilot-gateway/restart-proxy.sh
 ```
-목록에 없어도 와일드카드(`github_copilot/*`)가 chat 호환 모델은 즉시 처리함.
+목록에 없어도 와일드카드(`github_copilot/*`)가 chat 호환 모델은 즉시 처리하지만, **responses 전용 신모델(gpt-6-astra 같은)은 와일드카드가 못 받는다** — capi 라우팅이 필요해서 refresh 전엔 아예 안 됨. Claude Code를 거치지 않고 게이트웨이만 갱신하고 싶을 때 위 명령을 수동으로 돌려도 된다.
 
 ## litellm 업그레이드 시 (주의)
 
@@ -170,6 +172,7 @@ Claude Code의 WebSearch는 Anthropic 서버가 실행하는 서버사이드 툴
 ## 알려진 이슈 대응 사례
 
 - **`claude-fable-5` 등 저장된 기본 모델과 충돌**: Claude Code `/model`로 저장한 기본 모델(예: Fable 5)이 `claude-copilot.sh` 실행 시 게이트웨이의 `ANTHROPIC_MODEL`을 덮어써서 존재하지 않는 Copilot 모델을 요청 → "unknown Copilot-Integration-Id" 에러. 대응: (1) 실제 Anthropic 모델명 → Copilot 모델 별칭을 `refresh-models.sh`에 추가, (2) `claude-copilot.sh`가 `--model`을 명시적으로 넘기지 않는 한 항상 `$ANTHROPIC_MODEL`을 강제 지정하도록 수정.
+- **Copilot이 dated Claude id를 retire**: 2026-09-07, `claude-opus-4.6`/`claude-sonnet-4.6`이 Copilot 카탈로그에서 사라짐 → `refresh-models.sh`에 리터럴로 박혀있던 호환 별칭(`claude-opus-4-5`/`claude-opus-4-1`/`claude-sonnet-4-5`/`claude-sonnet-4-6`)이 죽은 upstream id를 계속 가리켜 `model_not_supported` 400 발생. `refresh-models.sh` 재실행만으론 안 고쳐짐(동적 카탈로그 루프는 살아있는 id만 반영, 리터럴 별칭은 스크립트 소스를 직접 고쳐야 함). 대응: 별칭 타겟을 `claude-opus-5`/`claude-sonnet-5`로 갱신, 그리고 dated id 자체(`claude-opus-4.6` 등)도 호환 별칭으로 남겨 리다이렉트하도록 추가.
 
 ## 크레덴셜
 

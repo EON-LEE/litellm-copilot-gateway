@@ -110,12 +110,17 @@ emit_entry_1m() { # $1=model_name  $2=route  $3=upstream id
   # Compat aliases: real Anthropic model ids Claude Code may request (saved defaults,
   # alias resolution) mapped to the nearest Copilot model. Without these, unknown
   # claude-* names fall into the wildcard -> litellm's broken native path -> 400.
+  # Dated ids Copilot has since retired (4.6, 4-5, 4-1) are kept here pointing at
+  # their live successor -- Copilot returns "model_not_supported" for the id itself,
+  # so these MUST be literal redirects, not left to the dynamic catalog loop above.
   emit_entry_1m "claude-fable-5"            capi    "claude-opus-5"
   emit_entry_1m "claude-mythos-5"           capi    "claude-opus-5"
-  emit_entry_1m "claude-opus-4-5"           capi    "claude-opus-4.6"
-  emit_entry_1m "claude-opus-4-1"           capi    "claude-opus-4.6"
-  emit_entry_1m "claude-sonnet-4-5"         capi    "claude-sonnet-4.6"
-  emit_entry_1m "claude-sonnet-4-6"         capi    "claude-sonnet-4.6"
+  emit_entry_1m "claude-opus-4-5"           capi    "claude-opus-5"
+  emit_entry_1m "claude-opus-4-1"           capi    "claude-opus-5"
+  emit_entry_1m "claude-opus-4.6"           capi    "claude-opus-5"
+  emit_entry_1m "claude-sonnet-4-5"         capi    "claude-sonnet-5"
+  emit_entry_1m "claude-sonnet-4-6"         capi    "claude-sonnet-5"
+  emit_entry_1m "claude-sonnet-4.6"         capi    "claude-sonnet-5"
   # haiku aliases -> gpt-5-mini (in the current Copilot catalog with vision;
   # gpt-4o-mini is a legacy id whose image requests 400 upstream)
   emit_entry_1m "claude-haiku-4-5"          capi    "gpt-5-mini"
