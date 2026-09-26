@@ -20,12 +20,13 @@ echo "🔄 Refreshing Copilot model catalog..." >&2
 if "$DIR/refresh-models.sh" >&2; then
   "$DIR/restart-proxy.sh" >&2
 else
-  echo "⚠️  Model refresh failed — continuing with existing config.yaml" >&2
-  if ! curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models \
-       -H "Authorization: Bearer $LITELLM_MASTER_KEY" >/dev/null 2>&1; then
-    echo "⚠️  Gateway not reachable on :4000 — starting it..." >&2
-    "$DIR/start-proxy.sh" >&2
+  if [ ! -s "$DIR/config.yaml" ]; then
+    echo "ERROR: model refresh failed and no existing config.yaml is available" >&2
+    exit 1
   fi
+  echo "⚠️  Model refresh failed — continuing with existing config.yaml" >&2
+  # LiteLLM discovery can succeed while its Copilot backend is down.
+  "$DIR/start-proxy.sh" >&2
 fi
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:4000"
@@ -36,17 +37,19 @@ export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-claude-opus-5}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-sonnet-5}"
-# gpt-5-mini, not gpt-4o-mini: gpt-5-mini is in Copilot's current model catalog with
-# vision registered (gpt-4o-mini images 400 upstream: "image media type not supported"),
-# routes via copilot-api /responses (streams correctly), and is copilot-api's default
-# messageApiWebSearchModel so WebSearch requests stay on the same model.
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-gpt-5-mini}"
-export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-gpt-5-mini}"   # older CC versions
+# A named model must call that actual Copilot model, never a substitute.
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4.5}"
+# Explicit helper model for older clients. copilot-api separately runs hosted
+# WebSearch on its configured messageApiWebSearchModel, not on Haiku.
+export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-gpt-5-mini}"
 
 # Force the model unless the caller passed --model: a user's saved default model
 # (e.g. claude-fable-5 from /model) would otherwise override ANTHROPIC_MODEL and
 # request a model that doesn't exist behind the gateway.
 for arg in "$@"; do
-  if [ "$arg" = "--model" ]; then exec claude --dangerously-skip-permissions "$@"; fi
+  case "$arg" in
+    --) break ;;
+    --model|--model=*) exec claude --dangerously-skip-permissions "$@" ;;
+  esac
 done
 exec claude --dangerously-skip-permissions --model "$ANTHROPIC_MODEL" "$@"

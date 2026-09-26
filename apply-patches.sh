@@ -20,6 +20,8 @@
 #          content_block_start with a 500 error frame and no message_stop.
 #          Affects every github_copilot-direct chat model (gpt-4.1, gpt-4o,
 #          gemini-*, ...) when streamed via /v1/messages.
+# Patch 4: expose allowlisted Copilot model_info in discovery responses, without
+#          leaking configuration or changing discovery for other providers.
 set -euo pipefail
 
 SITE="$HOME/.local/share/uv/tools/litellm/lib/python3.13/site-packages"
@@ -133,3 +135,74 @@ open(path, "w").write(text.replace(old, new))
 PYEOF
   grep -q "PATCHED (local): usage-only chunk" "$STREAMER" && echo "Patch 3b applied (loop-top empty-choices guard in __next__/__anext__)." || { echo "ERROR: patch 3b failed"; exit 1; }
 fi
+
+UTILS="$SITE/litellm/proxy/utils.py"
+if [ ! -f "$UTILS" ]; then
+  echo "ERROR: Patch 4: $UTILS not found (litellm not installed via uv tool?)" >&2
+  exit 1
+fi
+
+python3 - "$UTILS" <<'PYEOF'
+import ast
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+marker = "# PATCHED (local): expose configured Copilot discovery metadata"
+old = """    if not include_metadata:
+        return base
+"""
+new = """    # PATCHED (local): expose configured Copilot discovery metadata
+    if llm_router is not None:
+        configured_models = llm_router.get_model_list(model_name=model_id) or []
+        if len(configured_models) == 1:
+            configured_info = configured_models[0].get("model_info") or {}
+            if configured_info.get("gateway_provider") == "github_copilot":
+                for source, target in (
+                    ("display_name", "display_name"),
+                    ("description", "description"),
+                    ("gateway_provider", "owned_by"),
+                    ("upstream_model_id", "upstream_model_id"),
+                    ("max_context_window_tokens", "max_context_window_tokens"),
+                    ("max_non_streaming_output_tokens", "max_non_streaming_output_tokens"),
+                ):
+                    value = configured_info.get(source)
+                    if value is not None:
+                        base[target] = value
+
+""" + old
+
+
+def fail(reason):
+    print(f"ERROR: Patch 4: {reason} — upstream may have changed; inspect {path} manually.", file=sys.stderr)
+    sys.exit(1)
+
+
+try:
+    text = path.read_text()
+    tree = ast.parse(text)
+except (OSError, SyntaxError) as error:
+    fail(f"cannot read/parse discovery source: {error}")
+
+functions = [node for node in tree.body
+             if isinstance(node, ast.FunctionDef) and node.name == "create_model_info_response"]
+if len(functions) != 1:
+    fail(f"expected exactly 1 create_model_info_response function, found {len(functions)}")
+
+function = functions[0]
+lines = text.splitlines(keepends=True)
+start, end = function.lineno - 1, function.end_lineno
+block = "".join(lines[start:end])
+if block.count(new) == 1 and text.count(marker) == 1 and block.count(old) == 1:
+    print("Patch 4 already applied.")
+    sys.exit(0)
+if marker in text:
+    fail("existing discovery patch differs from the expected block")
+if block.count(old) != 1:
+    fail(f"expected exactly 1 discovery return anchor, found {block.count(old)}")
+
+updated = "".join(lines[:start]) + block.replace(old, new) + "".join(lines[end:])
+ast.parse(updated)
+path.write_text(updated)
+print("Patch 4 applied (configured Copilot discovery metadata).")
+PYEOF

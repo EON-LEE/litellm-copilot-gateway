@@ -8,3 +8,7 @@ config.yaml.bak
 
 # Runtime logs
 *.log
+
+# Python test/runtime caches
+__pycache__/
+*.py[cod]
