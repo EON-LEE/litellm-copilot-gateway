@@ -9,9 +9,13 @@ PatchError, so an unverified LiteLLM never serves traffic with a missing fix.
 from __future__ import annotations
 
 import ast
+import base64
+import hashlib
 import importlib.abc
 import importlib.machinery
+import importlib.metadata
 import importlib.util
+import os
 import re
 import sys
 
@@ -211,6 +215,37 @@ PATCHES = {
 }
 
 
+def modified_on_disk(path):
+    """True if `path` differs from LiteLLM's wheel RECORD (e.g. edited in place by the legacy apply-patches.sh)."""
+    try:
+        files = importlib.metadata.distribution("litellm").files or []
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    target = os.path.normcase(os.path.realpath(path))
+    for entry in files:
+        if entry.hash is None or entry.hash.mode != "sha256":
+            continue
+        if os.path.normcase(os.path.realpath(entry.locate())) != target:
+            continue
+        with open(path, "rb") as handle:
+            digest = base64.urlsafe_b64encode(hashlib.sha256(handle.read()).digest()).rstrip(b"=").decode()
+        return digest != entry.hash.value
+    return False
+
+
+def _checked(fullname, path, source):
+    try:
+        return patched_source(fullname, source)
+    except PatchError as error:
+        if modified_on_disk(path):
+            raise PatchError(
+                f"{error}. The installed file {path} was modified on disk (likely by the legacy "
+                "apply-patches.sh through uv's shared hardlinked cache). Restore a pristine LiteLLM: "
+                "`uv cache clean litellm` then reinstall (e.g. `uv tool install --reinstall litellm-copilot-gateway`)."
+            ) from error
+        raise
+
+
 def patched_source(fullname, source):
     for patch in PATCHES[fullname]:
         source = patch(source)
@@ -221,7 +256,7 @@ def patched_source(fullname, source):
 class _PatchedLoader(importlib.machinery.SourceFileLoader):
     def get_code(self, fullname):
         source = importlib.util.decode_source(self.get_data(self.path))
-        return compile(patched_source(fullname, source), self.path, "exec", dont_inherit=True)
+        return compile(_checked(fullname, self.path, source), self.path, "exec", dont_inherit=True)
 
 
 class _PatchFinder(importlib.abc.MetaPathFinder):
@@ -244,19 +279,25 @@ def install():
         sys.meta_path.insert(0, _PatchFinder())
 
 
-def module_source(fullname):
-    """Locate a target's source without importing it (parents are imported)."""
+def module_path(fullname):
+    """Locate a target's source file without importing it (parents are imported)."""
     parent, _, _ = fullname.rpartition(".")
     package = importlib.import_module(parent)
     spec = importlib.machinery.PathFinder.find_spec(fullname, package.__path__)
     if spec is None or not spec.origin:
         raise PatchError(f"{fullname}: module not found")
-    with open(spec.origin, "rb") as handle:
+    return spec.origin
+
+
+def module_source(fullname):
+    with open(module_path(fullname), "rb") as handle:
         return importlib.util.decode_source(handle.read())
 
 
 def verify():
     """Apply every patch to the installed sources without importing them; returns patch labels."""
     for fullname in PATCHES:
-        patched_source(fullname, module_source(fullname))
+        path = module_path(fullname)
+        with open(path, "rb") as handle:
+            _checked(fullname, path, importlib.util.decode_source(handle.read()))
     return sorted(patch.__doc__.split(":", 1)[0] for patches in PATCHES.values() for patch in patches)

@@ -1,6 +1,11 @@
 """In-memory LiteLLM patches P1–P6 (offline; real LiteLLM is imported only in a subprocess)."""
+import base64
+import hashlib
 import json
+import os
+import tempfile
 import unittest
+from unittest import mock
 
 from helpers import run_python
 
@@ -103,6 +108,43 @@ out["p4"] = {n: utils.create_model_info_response(n, "openai", llm_router=router,
              for n in ("copilot", "plain")}
 print("JSON" + json.dumps(out))
 '''
+
+
+class OnDiskTamperTests(unittest.TestCase):
+    """A legacy in-place patch (shared via uv's hardlinked cache) must be diagnosed, not misreported as an upgrade."""
+
+    def _fake_record(self, path, data):
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        entry = mock.Mock()
+        entry.hash = mock.Mock(mode="sha256", value=digest)
+        entry.locate.return_value = path
+        return mock.Mock(files=[entry])
+
+    def test_pristine_installed_files_match_record(self):
+        for fullname in lp.PATCHES:
+            with self.subTest(module=fullname):
+                self.assertFalse(lp.modified_on_disk(lp.module_path(fullname)))
+
+    def test_modified_file_explains_cache_fix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "transformation.py")
+            with open(path, "wb") as handle:
+                handle.write(b"x = 1  # PATCHED (local)\n")
+            with mock.patch.object(lp.importlib.metadata, "distribution", return_value=self._fake_record(path, b"x = 1\n")):
+                self.assertTrue(lp.modified_on_disk(path))
+                with self.assertRaisesRegex(lp.PatchError, "uv cache clean litellm"):
+                    lp._checked("litellm.llms.anthropic.experimental_pass_through.adapters.transformation",
+                                path, "x = 1  # PATCHED (local)\n")
+
+    def test_unmodified_file_keeps_plain_anchor_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "transformation.py")
+            with open(path, "wb") as handle:
+                handle.write(b"x = 1\n")
+            with mock.patch.object(lp.importlib.metadata, "distribution", return_value=self._fake_record(path, b"x = 1\n")):
+                with self.assertRaises(lp.PatchError) as caught:
+                    lp._checked("litellm.llms.anthropic.experimental_pass_through.adapters.transformation", path, "x = 1\n")
+                self.assertNotIn("uv cache clean", str(caught.exception))
 
 
 class ImportedPatchTests(unittest.TestCase):
