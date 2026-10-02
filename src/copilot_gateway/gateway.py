@@ -14,6 +14,23 @@ def eprint(*args):
     print(*args, file=sys.stderr, flush=True)
 
 
+def safe_console():
+    """Never crash on a legacy console codepage (e.g. cp949) over a non-ASCII character."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+HELP_FLAGS = ("-h", "--help", "help", "-V", "--version")
+
+
+def is_help(argv) -> bool:
+    """Help/version requests must not start services (or install anything)."""
+    return bool(argv) and argv[0] in HELP_FLAGS
+
+
 def build_services(settings: Settings, key: str | None = None) -> dict:
     key = key or settings.master_key()
     litellm_env = {"LITELLM_MASTER_KEY": key, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",

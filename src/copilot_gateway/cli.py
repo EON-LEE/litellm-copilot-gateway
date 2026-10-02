@@ -235,6 +235,7 @@ def build_parser():
 
 
 def main(argv=None):
+    gateway.safe_console()
     args = build_parser().parse_args(argv)
     settings = Settings.load()
     try:

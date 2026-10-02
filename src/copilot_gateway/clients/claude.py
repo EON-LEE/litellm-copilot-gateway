@@ -51,16 +51,25 @@ def claude_args(argv, model):
 
 
 def run(command, env):
-    if os.name == "posix":
-        os.execvpe(command[0], command, env)
-    # Windows has no exec: keep Ctrl+C for the child, then mirror its exit code.
-    import signal
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    return subprocess.call(command, env=env)
+    try:
+        if os.name == "posix":
+            os.execvpe(command[0], command, env)
+        # Windows has no exec: keep Ctrl+C for the child, then mirror its exit code.
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        return subprocess.call(command, env=env)
+    except OSError as error:
+        gateway.eprint(f"ERROR: cannot run {command[0]}: {error}")
+        return 127
 
 
 def main(argv=None):
+    gateway.safe_console()
     argv = list(sys.argv[1:] if argv is None else argv)
+    if gateway.is_help(argv):
+        gateway.eprint(__doc__)
+        executable = os.environ.get("CCP_CLAUDE") or shutil.which("claude")
+        return run([executable, *argv], dict(os.environ)) if executable else 0
     do_refresh = True
     if argv[:1] == ["--no-refresh"]:
         do_refresh, argv = False, argv[1:]

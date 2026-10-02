@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# List user-visible Copilot models with real names and separate token limits.
-# Uses the SAME selection policy as refresh-models.sh; no aliases or legacy extras.
+# Deprecated: kept so existing aliases keep working. Use ccgw models.
 set -euo pipefail
-CRED="$HOME/.config/litellm/github_copilot"
-GH_TOKEN=$(cat "$CRED/access-token")
-BEARER=$(curl -fsS --max-time 20 https://api.github.com/copilot_internal/v2/token \
-  -H "Authorization: token $GH_TOKEN" \
-  -H "editor-version: vscode/1.100.0" | jq -re '.token')
-curl -fsS --max-time 20 https://api.githubcopilot.com/models \
-  -H "Authorization: Bearer $BEARER" \
-  -H "Copilot-Integration-Id: vscode-chat" \
-  -H "editor-version: vscode/1.100.0" \
-| python3 "$HOME/litellm-copilot-gateway/model_catalog.py" --list | column -t -s $'\t'
+if ! command -v ccgw >/dev/null 2>&1; then
+  echo "ccgw not found. Install: uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway" >&2
+  exit 127
+fi
+exec ccgw models "$@"

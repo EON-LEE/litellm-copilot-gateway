@@ -92,5 +92,21 @@ class CodexLauncherTests(unittest.TestCase):
         self.assertEqual(codex.find_codex({"CCX_CODEX": "/opt/codex"}), "/opt/codex")
 
 
+class HelpTests(unittest.TestCase):
+    def test_help_never_starts_or_installs_anything(self):
+        from unittest import mock
+        boom = mock.Mock(side_effect=AssertionError("help must not touch the gateway"))
+        with mock.patch.object(gateway, "ensure", boom), mock.patch("copilot_gateway.settings.Settings.load", boom), \
+                mock.patch.object(codex, "find_codex", return_value=None), \
+                mock.patch("shutil.which", return_value=None), mock.patch.dict("os.environ", {}, clear=False):
+            for argv in (["--help"], ["-h"], ["--version"], ["help"]):
+                with self.subTest(argv=argv):
+                    self.assertEqual(codex.main(argv), 0)
+                    self.assertEqual(claude.main(argv), 0)
+
+    def test_missing_executable_is_reported_not_raised(self):
+        self.assertEqual(claude.run(["definitely-not-a-real-binary-ccgw"], {}), 127)
+
+
 if __name__ == "__main__":
     unittest.main()

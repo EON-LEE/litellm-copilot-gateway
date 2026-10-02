@@ -131,7 +131,12 @@ def codex_env(settings, key, base=None):
 
 
 def main(argv=None):
+    gateway.safe_console()
     argv = list(sys.argv[1:] if argv is None else argv)
+    if gateway.is_help(argv):
+        gateway.eprint(__doc__)
+        executable = find_codex()
+        return run([executable, *argv], dict(os.environ)) if executable else 0
     do_refresh = True
     if argv[:1] == ["--no-refresh"]:
         do_refresh, argv = False, argv[1:]

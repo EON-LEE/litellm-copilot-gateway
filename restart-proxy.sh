@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Restart only litellm (config reload). copilot-api keeps running.
+# Deprecated: kept so existing aliases keep working. Use ccgw restart.
 set -euo pipefail
-"$HOME/litellm-copilot-gateway/stop-proxy.sh" litellm
-exec "$HOME/litellm-copilot-gateway/start-proxy.sh"
+if ! command -v ccgw >/dev/null 2>&1; then
+  echo "ccgw not found. Install: uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway" >&2
+  exit 127
+fi
+exec ccgw restart "$@"
