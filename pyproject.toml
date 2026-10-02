@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "litellm-copilot-gateway"
+version = "0.2.0"
+description = "Use GitHub Copilot subscription models from Claude Code and OpenAI Codex through a local LiteLLM gateway"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+dependencies = [
+    "litellm[proxy]==1.95.0",
+    "fastapi==0.140.6",
+    "psutil>=6.0",
+    "PyYAML>=6",
+]
+
+[project.scripts]
+ccgw = "copilot_gateway.cli:main"
+ccp = "copilot_gateway.clients.claude:main"
+ccx = "copilot_gateway.clients.codex:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/copilot_gateway"]
