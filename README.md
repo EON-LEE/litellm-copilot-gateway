@@ -47,6 +47,7 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 - `ccp`/`ccx`는 실행마다 Copilot 카탈로그를 새로 받아 설정을 갱신하고(`--no-refresh`로 생략), 필요한 서비스만 띄운다. 갱신 실패 시 기존 설정으로 기동.
 - `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존. 기본값: opus=`claude-opus-5`, sonnet=`claude-sonnet-5`, haiku=`claude-haiku-4.5`, small-fast=`gpt-5-mini`.
 - `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로. 기본 모델 변경: `CCX_MODEL`. 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, 그다음 VS Code 확장 번들 `codex`).
+- `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요).
 - 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
 
 ### 기존 bash 버전에서 이전
