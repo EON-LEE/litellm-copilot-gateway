@@ -97,7 +97,7 @@ GitHub 토큰: `~/.config/litellm/github_copilot/` (`GITHUB_COPILOT_TOKEN_DIR`�
 
 - `model_picker_enabled=true`인 chat 모델만 공개. `Internal only` 및 `policy.state`가 비활성인 모델 제외. 고정 allowlist 없음 → 새 모델은 자동 반영.
 - **Claude Code (:4000)**: Claude Code는 ID에 `claude`가 있는 모델만 받으므로 비-Claude는 `claude-<Copilot ID>`로 공개(화면 이름은 실제 GPT/Gemini 이름), 원본 ID는 숨김 별칭. 전체 컨텍스트 ≥ 1M 모델은 `[1m]` 숨김 별칭.
-- **Codex (:4001)**: Copilot 원본 ID 그대로 (`gpt-5.5`, `claude-opus-5`, `gemini-3.8-flash` …). GPT(Responses) 모델은 copilot-api의 `/v1/responses`, Claude는 Messages, chat-only는 github_copilot provider.
+- **Codex (:4001)**: Copilot 원본 ID 그대로 (`gpt-5.5`, `claude-opus-5`, `gemini-3.8-flash` …). GPT(Responses) 모델은 copilot-api의 `/v1/responses`, Claude는 Messages, chat-only는 github_copilot provider. xAI(Grok)는 Responses 경로 + 미지원 툴 타입 제거 훅(아래 제약 참고).
 - 같은 버전의 표기 차이만 허용(`claude-haiku-4-5` → 실제 `claude-haiku-4.5`). 다른 모델·구버전→신버전 대체 없음. 미등록·종료된 모델은 오류.
 - 한도는 카탈로그 선언값(컨텍스트·입력·출력·비스트리밍 출력)을 그대로 쓰고 추정하지 않음. 누락·형식 오류·충돌 시 갱신을 중단하고 기존 설정 유지(fail-closed). 내용이 같으면 파일을 다시 쓰지 않음.
 
@@ -115,6 +115,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **count_tokens**: 로컬 근사치(tools 미집계). `Anthropic CountTokens API error: 401` 경고는 무해.
 - **github_copilot 직결 경로 usage**: input_tokens 과소보고 → 비용 집계 신뢰 불가.
 - **grok**: tools 없는 bare 요청은 copilot-api 버그로 400. 에이전트는 항상 tools를 보내므로 무관.
+- **grok + Codex**: Copilot의 xAI `/responses`가 Codex의 `namespace`(멀티 에이전트) 툴과 hosted `web_search` 툴을 400/422로 거부. Codex 설정은 xAI 모델에 한해 이 두 툴만 요청에서 제거(`copilot_gateway.hooks`, 카탈로그 `unsupported_tool_types`). 셸·파일 편집 등 나머지 툴은 정상, Grok에서는 Codex 웹검색·서브에이전트만 불가.
 - **인증 오류 코드**: DB 없는 LiteLLM 1.95.0은 키 누락 500, 잘못된 키 400. 요청은 거부됨.
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
 - **ToS**: 에디터 외부의 Copilot API 사용은 비공식 영역. 개인·로컬·수동 규모로만 사용 권장.

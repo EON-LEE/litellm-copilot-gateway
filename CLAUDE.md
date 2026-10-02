@@ -39,7 +39,7 @@ LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m 
 1. **WebSearch**: `"model":"claude-haiku-4-5"`, `"tools":[{"type":"web_search_20250305","name":"web_search"}]`, `"tool_choice":{"type":"tool","name":"web_search"}` → `server_tool_use` + `web_search_tool_result`.
 2. **스트리밍**: `"stream":true`로 claude-sonnet-5와 공개 GPT 모델 → `message_stop`으로 끝나고 "list index out of range" 없음.
 3. **메인 모델**: claude-opus-5 단순 질문 200.
-4. **Codex**: `ccx exec --skip-git-repo-check -m <model> "..."`로 GPT·Claude·Gemini 각 1회 툴 루프 (Claude는 P5/P6 회귀 확인용).
+4. **Codex**: `ccx exec --skip-git-repo-check -s workspace-write -m <model> "..."`로 GPT·Claude·Gemini·Grok 각 1회 툴 루프 (Claude는 P5/P6, Grok은 `hooks.tool_filter` 회귀 확인용).
 
 :4000/:4001에서만 나면 LiteLLM, :4141 직접 호출에서도 나면 copilot-api/업스트림 문제.
 

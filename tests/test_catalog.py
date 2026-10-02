@@ -115,6 +115,20 @@ class CodexConfigTests(unittest.TestCase):
         self.assertEqual(config["router_settings"]["model_group_alias"],
                          {"claude-haiku-4-5": {"model": "claude-haiku-4.5", "hidden": True}})
 
+    def test_xai_responses_models_are_marked_for_tool_filtering(self):
+        value = catalog()
+        grok = model("grok-4.7", "Grok 4.7", 256000, 200000, 32000, ["/responses"])
+        grok["vendor"] = "xAI"
+        value["data"].append(grok)
+        config = cat.build_codex_config(value, CAPI)
+        self.assertEqual(config["litellm_settings"]["callbacks"], ["copilot_gateway.hooks.tool_filter"])
+        info = {r["model_name"]: r["model_info"] for r in config["model_list"]}
+        self.assertEqual(info["grok-4.7"]["unsupported_tool_types"], ["namespace", "web_search"])
+        self.assertEqual(config["model_list"][-1]["litellm_params"]["model"], "openai/grok-4.7")
+        for name in info.keys() - {"grok-4.7"}:
+            self.assertNotIn("unsupported_tool_types", info[name])
+        self.assertNotIn("callbacks", cat.build_config(value, CAPI)["litellm_settings"])
+
 
 class RefreshTests(unittest.TestCase):
     def setUp(self):
