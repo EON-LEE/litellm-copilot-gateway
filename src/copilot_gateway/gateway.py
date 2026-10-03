@@ -45,7 +45,7 @@ def build_services(settings: Settings, key: str | None = None) -> dict:
 
     return {
         "capi": services.Service("capi", settings.capi_port, settings.logs / "copilot-api.log", "capi",
-                                 command=capi_command, env={"HOST": "127.0.0.1"}, startup_timeout=60),
+                                 command=capi_command, env={"HOST": "127.0.0.1"}),
         "claude": services.Service("claude", settings.claude_port, settings.logs / "litellm-claude.log",
                                    "litellm", config=settings.claude_config,
                                    command=litellm_command(settings.claude_config, settings.claude_port),

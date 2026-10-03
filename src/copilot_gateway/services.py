@@ -45,7 +45,8 @@ class Service:
     command: Callable[[], list] | None = None
     env: dict = field(default_factory=dict)
     auth: str | None = None
-    startup_timeout: float = 90
+    # First launch after install can be slow (Windows Defender scans new node_modules / site-packages).
+    startup_timeout: float = 180
 
     def classify(self, cmdline) -> str | None:
         """'ours' when the command line is this gateway service, 'legacy' for the bash-era one."""
@@ -234,8 +235,24 @@ def start(service, log=print) -> bool:
             except (OSError, ValueError, ServiceError, urllib.error.URLError) as error:
                 last_error = error
         time.sleep(0.5)
+    _abandon(process)
     raise ServiceError(f"{service.name}: not ready after {service.startup_timeout:.0f}s ({last_error}); "
                        f"see {service.log}\n{_log_tail(service.log)}")
+
+
+def _abandon(process):
+    """Terminate a child we spawned that never became ready (no orphan holding the port)."""
+    try:
+        parent = psutil.Process(process.pid)
+        family = [parent, *parent.children(recursive=True)]
+    except psutil.NoSuchProcess:
+        return
+    for proc in family:
+        try:
+            proc.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    psutil.wait_procs(family, timeout=10)
 
 
 def check_ready(service):

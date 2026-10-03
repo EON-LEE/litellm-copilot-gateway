@@ -89,6 +89,15 @@ class StopTests(unittest.TestCase):
         proc.wait(10)
         self.assertFalse(services.port_open(self.port))
 
+    def test_startup_timeout_terminates_the_spawned_child(self):
+        marker = self.home.path / "child.pid"
+        code = f"import os,time;open({str(marker)!r},'w').write(str(os.getpid()));time.sleep(120)"
+        service = services.Service("codex", self.port, self.home.path / "codex.log", "litellm", config=self.config,
+                                   command=lambda: [sys.executable, "-c", code], startup_timeout=3)
+        with self.assertRaises(services.ServiceError):
+            services.start(service, log=lambda *_: None)
+        self.assertFalse(services.psutil.pid_exists(int(marker.read_text())))
+
 
 if __name__ == "__main__":
     unittest.main()
