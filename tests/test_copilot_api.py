@@ -57,6 +57,26 @@ class IdentityPatchTests(unittest.TestCase):
                     capi.check_identity_options(path)
                 self.assertEqual(path.read_text(encoding="utf-8"), bad)
 
+    def test_http_transport_is_pinned_without_touching_other_keys(self):
+        path = Path(self.temp.name) / "sub" / "config.json"
+        self.assertTrue(capi.enforce_http_transport(path))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"useResponsesApiWebSocket": False})
+        path.write_text('{"useResponsesApiWebSocket": true, "smallModels": {"codex": "x"}}', encoding="utf-8")
+        self.assertTrue(capi.enforce_http_transport(path))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                         {"useResponsesApiWebSocket": False, "smallModels": {"codex": "x"}})
+        before = path.read_text(encoding="utf-8")
+        self.assertFalse(capi.enforce_http_transport(path))
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_http_transport_fails_closed_on_unknown_upstream(self):
+        source = Path(self.temp.name) / "config.js"
+        path = Path(self.temp.name) / "config.json"
+        source.write_text("return getConfig().somethingElse ?? true;", encoding="utf-8")
+        with self.assertRaises(capi.CopilotApiError):
+            capi.enforce_http_transport(path, source)
+        self.assertFalse(path.exists())
+
 
 def installed_package():
     home = os.environ.get("CCGW_TEST_HOME") or str(data_dir())
@@ -74,10 +94,11 @@ class InstalledBundleTests(unittest.TestCase):
             copy = Path(temp) / "pkg"
             shutil.copytree(package / "dist", copy / "dist")
             shutil.copy(package / "package.json", copy / "package.json")
-            _, server, _ = capi.verify_package(copy)
+            _, server, config = capi.verify_package(copy)
             capi.patch_identity(server)
             self.assertIn(capi.MARKER, server.read_text(encoding="utf-8"))
             self.assertFalse(capi.patch_identity(server))
+            self.assertTrue(capi.enforce_http_transport(Path(temp) / "config.json", config))
 
 
 if __name__ == "__main__":

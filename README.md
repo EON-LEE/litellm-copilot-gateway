@@ -118,6 +118,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **grok + Codex**: Copilot의 xAI `/responses`가 Codex의 `namespace`(멀티 에이전트) 툴과 hosted `web_search` 툴을 400/422로 거부. Codex 설정은 xAI 모델에 한해 이 두 툴만 요청에서 제거(`copilot_gateway.hooks`, 카탈로그 `unsupported_tool_types`). 셸·파일 편집 등 나머지 툴은 정상, Grok에서는 Codex 웹검색·서브에이전트만 불가.
 - **인증 오류 코드**: DB 없는 LiteLLM 1.95.0은 키 누락 500, 잘못된 키 400. 요청은 거부됨.
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
+- **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상). `ccgw start`가 copilot-api 설정의 `useResponsesApiWebSocket`만 `false`로 고정한다(다른 키는 건드리지 않음, 업스트림 기본값 형태가 바뀌면 시작 거부).
 - **ToS**: 에디터 외부의 Copilot API 사용은 비공식 영역. 개인·로컬·수동 규모로만 사용 권장.
 
 ## 검증 현황

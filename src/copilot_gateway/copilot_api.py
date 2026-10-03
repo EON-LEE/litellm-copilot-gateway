@@ -216,10 +216,51 @@ def seed_token(config_source, token_dir, environ=None):
     write_private(target, token)
 
 
+TRANSPORT_KEY = "useResponsesApiWebSocket"
+
+
+def enforce_http_transport(path, config_source=None):
+    """Pin copilot-api to HTTP SSE for Responses streaming.
+
+    Copilot's ``ws:/responses`` transport fails mid-stream for some models
+    (gpt-5-mini: ``internal_error``) while HTTP SSE works for every model.
+    Only this one key is touched; returns True when the file was changed.
+    """
+    if config_source is not None and \
+            f"getConfig().{TRANSPORT_KEY} ?? true" not in config_source.read_text(encoding="utf-8"):
+        raise CopilotApiError(f"unexpected {TRANSPORT_KEY} handling; upstream may have changed")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raw = ""
+    config = json.loads(raw) if raw.strip() else {}
+    if not isinstance(config, dict):
+        raise CopilotApiError("Copilot API config must be a JSON object")
+    if config.get(TRANSPORT_KEY) is False:
+        return False
+    config[TRANSPORT_KEY] = False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=path.parent,
+                                         prefix=".config-", delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(json.dumps(config, indent=2) + "\n")
+        if path.exists():
+            temporary.chmod(path.stat().st_mode)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return True
+
+
 def prepare(home, token_dir, port, environ=None):
     """Validate + patch the install and return the launch command."""
     entry, server, config = verify_package(package_dir(home))
-    check_identity_options(config_path(config, environ))
+    path = config_path(config, environ)
+    check_identity_options(path)
+    enforce_http_transport(path, config)
     patch_identity(server)
     seed_token(config, token_dir, environ)
     return [node_executable(), str(entry), "start", "--port", str(port)]
