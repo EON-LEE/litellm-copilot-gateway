@@ -119,16 +119,23 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **인증 오류 코드**: DB 없는 LiteLLM 1.95.0은 키 누락 500, 잘못된 키 400. 요청은 거부됨.
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
 - **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상). `ccgw start`가 copilot-api 설정의 `useResponsesApiWebSocket`만 `false`로 고정한다(다른 키는 건드리지 않음, 업스트림 기본값 형태가 바뀌면 시작 거부).
+- **Codex Windows 샌드박스**: Codex의 Windows 네이티브 샌드박스를 설정하지 않으면(VS Code의 "Finish Windows setup" 등, OS 설정 변경) `-s workspace-write`도 쓰기·명령 실행이 거부된다. 게이트웨이와 무관한 Codex 동작이며, 설정을 마치거나 신뢰하는 폴더에서 `-s danger-full-access`를 쓴다. WSL/Linux/macOS는 해당 없음.
+- **Claude Code `[claude-code:unrecognized_model]` 경고**: WebSearch 보조 모델(gpt-5-mini 등 Claude 외 이름)에 대해 출력되는 Claude Code 측 정보성 경고. 요청은 정상 처리된다.
 - **ToS**: 에디터 외부의 Copilot API 사용은 비공식 영역. 개인·로컬·수동 규모로만 사용 권장.
 
 ## 검증 현황
 
 | 항목 | 상태 |
 |---|---|
-| Windows 네이티브 기동/정지/재시작 (3 서비스) | ✅ |
-| Codex CLI: GPT-5.5 · GPT-5.4-mini · Claude Opus/Sonnet 5 · Haiku 4.5 · Gemini 3.8 Flash 멀티 툴 루프 | ✅ (P5/P6 적용 후) |
-| Claude Code: 스트리밍 · 툴콜 · WebSearch · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
+| 기동/정지/재시작 (3 서비스) — Windows 네이티브 · WSL Ubuntu | ✅ |
+| `ccx exec` 파일 생성+셸 실행 툴 루프, 공개 모델 **24/24** (Claude · GPT · Gemini · Grok · MAI) — WSL(Codex CLI 0.160) · Windows(VS Code 번들 codex.exe) | ✅ (2026-10) |
+| `ccp -p` Write 툴 루프, 공개 모델 **24/24** — WSL · Windows | ✅ (2026-10) |
+| `ccp` WebSearch (실검색 결과) — WSL · Windows | ✅ (2026-10) |
+| `ccx code` VS Code 확장 대화 — Windows | ✅ |
+| Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
 | web_fetch 서버 툴 | ❌ (위 제약) |
+
+Windows의 `ccx exec` 루프는 Codex Windows 샌드박스 설정 없이 격리된 임시 폴더에서 `-s danger-full-access`로 실행했다(`workspace-write`는 아래 제약 참고).
 
 ## 개발 / 테스트
 
