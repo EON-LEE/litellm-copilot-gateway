@@ -102,9 +102,21 @@ def vscode_bundled_codex():
     return str(max(candidates, key=lambda item: _version_key(item[0]))[1])
 
 
+def winget_codex(environ=None):
+    """`winget install OpenAI.Codex` binary; its `codex` alias is missing when symlinks are not allowed."""
+    environ = os.environ if environ is None else environ
+    if sys.platform != "win32" or not environ.get("LOCALAPPDATA"):
+        return None
+    packages = Path(environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Packages"
+    found = sorted(path for path in packages.glob("OpenAI.Codex_*/codex-*-pc-windows-msvc.exe")
+                   if path.is_file())
+    return str(found[0]) if found else None
+
+
 def find_codex(environ=None):
     environ = os.environ if environ is None else environ
-    return environ.get("CCX_CODEX") or shutil.which("codex") or vscode_bundled_codex()
+    return (environ.get("CCX_CODEX") or shutil.which("codex") or winget_codex(environ)
+            or vscode_bundled_codex())
 
 
 def find_vscode(environ=None):

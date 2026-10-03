@@ -1,4 +1,6 @@
 """ccp / ccx launcher logic (no real claude/codex processes)."""
+from pathlib import Path
+import tempfile
 import tomllib
 import unittest
 
@@ -90,6 +92,21 @@ class CodexLauncherTests(unittest.TestCase):
 
     def test_find_codex_honours_override(self):
         self.assertEqual(codex.find_codex({"CCX_CODEX": "/opt/codex"}), "/opt/codex")
+
+    def test_winget_codex_without_alias(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "Microsoft" / "WinGet" / "Packages" / "OpenAI.Codex_Microsoft.Winget.Source_x"
+            package.mkdir(parents=True)
+            for name in ("codex-command-runner.exe", "codex-x86_64-pc-windows-msvc.exe"):
+                (package / name).write_bytes(b"")
+            (package / "codex-aarch64-pc-windows-msvc.exe").mkdir()
+            with mock.patch.object(codex.sys, "platform", "win32"):
+                self.assertEqual(codex.winget_codex({"LOCALAPPDATA": tmp}),
+                                 str(package / "codex-x86_64-pc-windows-msvc.exe"))
+                self.assertIsNone(codex.winget_codex({"LOCALAPPDATA": str(Path(tmp) / "none")}))
+            with mock.patch.object(codex.sys, "platform", "linux"):
+                self.assertIsNone(codex.winget_codex({"LOCALAPPDATA": tmp}))
 
 
 class HelpTests(unittest.TestCase):

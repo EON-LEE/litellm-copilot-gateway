@@ -31,6 +31,17 @@ $env:CCGW_COPILOT_API_SOURCE = "C:\path\jeffreycao-copilot-api-2.6.15.tgz"
 ccgw setup
 ```
 
+Codex CLI는 npm 없이도 설치할 수 있다 (`ccx`가 자동으로 찾음):
+
+```powershell
+winget install OpenAI.Codex      # Windows (symlink 정책으로 `codex` 별칭이 안 생겨도 ccx가 패키지 폴더에서 찾음)
+# 또는 https://github.com/openai/codex/releases 의 codex-<arch>-pc-windows-msvc.exe / -unknown-linux-musl 바이너리를 PATH에 두거나 CCX_CODEX로 지정
+```
+```bash
+brew install --cask codex        # macOS
+npm i -g @openai/codex           # npm
+```
+
 ## 사용법
 
 ```bash
@@ -46,7 +57,7 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 
 - `ccp`/`ccx`는 실행마다 Copilot 카탈로그를 새로 받아 설정을 갱신하고(`--no-refresh`로 생략), 필요한 서비스만 띄운다. 갱신 실패 시 기존 설정으로 기동.
 - `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존. 기본값: opus=`claude-opus-5`, sonnet=`claude-sonnet-5`, haiku=`claude-haiku-4.5`, small-fast=`gpt-5-mini`.
-- `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로. 기본 모델 변경: `CCX_MODEL`. 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, 그다음 VS Code 확장 번들 `codex`).
+- `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로. 기본 모델 변경: `CCX_MODEL`. 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, Windows winget 패키지, 그다음 VS Code 확장 번들 `codex`).
 - `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요).
 - 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
 
@@ -128,7 +139,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | 항목 | 상태 |
 |---|---|
 | 기동/정지/재시작 (3 서비스) — Windows 네이티브 · WSL Ubuntu | ✅ |
-| `ccx exec` 파일 생성+셸 실행 툴 루프, 공개 모델 **24/24** (Claude · GPT · Gemini · Grok · MAI) — WSL(Codex CLI 0.160) · Windows(VS Code 번들 codex.exe) | ✅ (2026-10) |
+| `ccx exec` 파일 생성+셸 실행 툴 루프, 공개 모델 **24/24** (Claude · GPT · Gemini · Grok · MAI) — WSL(Codex CLI 0.160) · Windows(VS Code 번들 codex.exe · winget Codex CLI 0.160) | ✅ (2026-10) |
 | `ccp -p` Write 툴 루프, 공개 모델 **24/24** — WSL · Windows | ✅ (2026-10) |
 | `ccp` WebSearch (실검색 결과) — WSL · Windows | ✅ (2026-10) |
 | `ccx code` VS Code 확장 대화 — Windows | ✅ |
