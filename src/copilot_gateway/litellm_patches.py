@@ -205,7 +205,21 @@ def late_message_item(source):
 """, 1, "P6 late message item")
 
 
+def structured_output_format(source):
+    """P7: Anthropic now rejects the deprecated top-level output_format."""
+    return _replace(source, """        self._apply_output_config(data=data, model=model, optional_params=optional_params)
+
+        return data
+""", """        self._apply_output_config(data=data, model=model, optional_params=optional_params)
+
+        if "output_format" in data:  # PATCHED (ccgw): preserve schema in the current API field
+            data.setdefault("output_config", {})["format"] = data.pop("output_format")
+        return data
+""", 1, "P7 structured output format")
+
+
 PATCHES = {
+    "litellm.llms.anthropic.chat.transformation": (structured_output_format,),
     "litellm.responses.litellm_completion_transformation.streaming_iterator": (late_message_item,),
     "litellm.responses.litellm_completion_transformation.transformation": (empty_assistant_items,),
     "litellm.llms.github_copilot.authenticator": (device_login_window,),

@@ -16,7 +16,7 @@ Windows 네이티브 · macOS · Linux · WSL 에서 **같은 명령**으로 동
 ```bash
 uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway
 ccgw setup      # 마스터키 생성 → copilot-api 2.6.15 설치 → GitHub device 로그인 → 모델 설정 생성
-ccgw doctor     # 전제조건 · LiteLLM 패치(P1–P6) · copilot-api 핀 확인
+ccgw doctor     # 전제조건 · LiteLLM 패치(P1–P7) · copilot-api 핀 확인
 ```
 
 PowerShell / bash / zsh 모두 동일. 업데이트는 `uv tool upgrade litellm-copilot-gateway`.
@@ -90,6 +90,7 @@ Codex CLI/VS Code ─/v1/responses─▶ LiteLLM :4001 (Responses) ─┼─▶ 
 | P4 | `/v1/models` | 허용 목록의 Copilot 표시명·설명·컨텍스트 노출 (Claude Code 모델 피커) |
 | P5 | Responses→Chat 변환 | Codex 히스토리의 빈 assistant 메시지 제거 · 텍스트를 tool call 앞으로 (Claude prefill 400) |
 | P6 | Responses 스트림 | reasoning/tool call로 시작한 스트림에서도 message item 생성 (Codex 텍스트 유실) |
+| P7 | Anthropic 구조화 출력 | 폐기된 `output_format`을 `output_config.format`으로 이동, effort 보존 (Codex→Claude JSON 스키마 400) |
 
 ### 데이터 위치 (`ccgw paths`)
 
@@ -127,6 +128,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **github_copilot 직결 경로 usage**: input_tokens 과소보고 → 비용 집계 신뢰 불가.
 - **grok**: tools 없는 bare 요청은 copilot-api 버그로 400. 에이전트는 항상 tools를 보내므로 무관.
 - **grok + Codex**: Copilot의 xAI `/responses`가 Codex의 `namespace`(멀티 에이전트) 툴과 hosted `web_search` 툴을 400/422로 거부. Codex 설정은 xAI 모델에 한해 이 두 툴만 요청에서 제거(`copilot_gateway.hooks`, 카탈로그 `unsupported_tool_types`). 셸·파일 편집 등 나머지 툴은 정상, Grok에서는 Codex 웹검색·서브에이전트만 불가.
+- **Codex→Messages/Chat 변환 경로의 namespace 툴**: LiteLLM 1.95.0은 Responses의 `namespace`를 변환할 수 없어 삭제한다. Claude Sonnet 5에서 Codex MCP·서브에이전트 실패를 실제 재현했다. MCP의 네임스페이스 툴도 해당하며, 다른 Chat 변환 모델도 이 제약을 공유한다. Claude Code의 MCP·Agent 툴과는 다른 경로다.
 - **인증 오류 코드**: DB 없는 LiteLLM 1.95.0은 키 누락 500, 잘못된 키 400. 요청은 거부됨.
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
 - **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상). `ccgw start`가 copilot-api 설정의 `useResponsesApiWebSocket`만 `false`로 고정한다(다른 키는 건드리지 않음, 업스트림 기본값 형태가 바뀌면 시작 거부).
@@ -147,6 +149,34 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | web_fetch 서버 툴 | ❌ (위 제약) |
 
 Windows의 `ccx exec` 루프는 Codex Windows 샌드박스 설정 없이 격리된 임시 폴더에서 `-s danger-full-access`로 실행했다(`workspace-write`는 아래 제약 참고).
+
+### 고급 기능 검증 범위 (2026-10-04)
+
+아래는 **전체 24개 모델의 기능 보장표가 아니다**. 대표 경로만 검증했다:
+Claude Code = Claude Sonnet 5 / GPT-5.5, Codex = GPT-5.5 / Claude Sonnet 5.
+Windows Codex는 샌드박스 미설정으로 `danger-full-access`, WSL Codex는 `workspace-write`.
+클라이언트는 Codex 0.160.0, Claude Code Windows 2.1.283 / WSL 2.1.284.
+
+| 기능 | Claude Code (두 대표 모델) | Codex GPT-5.5 | Codex Claude Sonnet 5 |
+|---|---|---|---|
+| 세션 재개 후 임의 문자열 기억 | Windows/WSL 성공 | Windows/WSL 성공 | Windows/WSL 성공 |
+| 수동 압축 | Windows/WSL compact_boundary 확인 | Windows/WSL 압축 후 문자열 기억 성공 | Windows/WSL 압축 후 문자열 기억 성공 |
+| JSON 스키마 출력 | Windows/WSL 성공 | Windows/WSL 성공 | P7 적용 후 Windows/WSL 성공 |
+| 이미지 입력 (색상 순서 식별) | Windows/WSL 성공 | Windows/WSL 성공 | Windows/WSL 성공 |
+| 단일 서브에이전트 (실제 툴 호출 확인) | Windows/WSL 성공 | Windows/WSL 성공 | 실패: namespace 삭제 |
+| 로컬 stdio MCP (서버 호출·임의 반환값 확인) | Windows/WSL 성공 사례 있음 | Windows 성공, WSL은 툴 발견/승인 정책 실패로 성공 미확인 | Windows/WSL 실패: namespace 삭제 |
+| 프로젝트 지침 로딩 | Windows/WSL CLAUDE.md 성공 | Windows/WSL AGENTS.md 성공 | 별도 검증 안 함 |
+| Codex hosted 웹검색 (실제 검색 이벤트·출처 URL) | 해당 없음: 기존 Claude Code WebSearch 검증과 별개 | Windows/WSL 성공 | 별도 검증 안 함 |
+| 한 응답의 flat function 툴 2개 | 별도 검증 안 함 | Windows/WSL 성공 | Windows/WSL 성공 |
+
+MCP는 모델의 툴 발견/선택 단계에서 실패 후 재시도 성공한 사례도 있어, 모든 서버·스키마의 안정성을 보장하지 않는다.
+WSL Codex MCP에서는 `approval policy is never`에 따른 실행 거부도 관찰했다. 이는 프록시 요청 실패와 구분해야 한다.
+JSON 결과가 스키마에 맞는다는 검증은 업스트림 constrained decoding의 모든 제약을 보장한다는 뜻이 아니다.
+수동 압축은 짧은 세션이며, 컨텍스트 한도까지 채운 자동 압축·반복 압축·장시간 세션은 미검증이다.
+Responses `reasoning.effort=low` 스트림은 두 대표 모델·두 OS에서 `response.completed`까지 성공했다.
+GPT-5.5는 reasoning 토큰을 보고했으나 Claude 경로는 0이었으므로, 요청 수락을 effort 의미의 동일성으로 해석하면 안 된다.
+추론 effort의 의미·캐싱 TTL·실제 최대 입력·병렬 MCP·취소·429 복구·VS Code 전체 기능도 별도 검증이 필요하다.
+현재 `ccp`는 권한 확인을 항상 건너뛰며, `ccx`의 별도 CODEX_HOME에는 평소 MCP/설정이 자동 복사되지 않는다.
 
 ## 개발 / 테스트
 

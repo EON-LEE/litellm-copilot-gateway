@@ -1,4 +1,4 @@
-"""In-memory LiteLLM patches P1–P6 (offline; real LiteLLM is imported only in a subprocess)."""
+"""In-memory LiteLLM patches P1–P7 (offline; real LiteLLM is imported only in a subprocess)."""
 import base64
 import hashlib
 import json
@@ -14,7 +14,7 @@ from copilot_gateway import litellm_patches as lp
 
 class AnchorTests(unittest.TestCase):
     def test_installed_litellm_accepts_every_patch(self):
-        self.assertEqual(lp.verify(), ["P1", "P2", "P3", "P4", "P5", "P6"])
+        self.assertEqual(lp.verify(), ["P1", "P2", "P3", "P4", "P5", "P6", "P7"])
 
     def test_each_patch_fails_closed_when_upstream_changes(self):
         for fullname, patches in lp.PATCHES.items():
@@ -76,11 +76,22 @@ from litellm.responses.litellm_completion_transformation import streaming_iterat
 from litellm.llms.anthropic.experimental_pass_through.adapters.transformation import (
     LiteLLMAnthropicMessagesAdapter)
 from litellm.llms.github_copilot import authenticator
+from litellm.llms.anthropic.chat.transformation import AnthropicConfig
 import inspect
 from litellm import Router
 import litellm.proxy.utils as utils
 
 out = {}
+schema = {"type": "json_schema", "schema": {"type": "object", "properties": {"answer": {"type": "integer"}},
+                                         "required": ["answer"], "additionalProperties": False}}
+config = AnthropicConfig()
+out["p7"] = config.transform_request(
+    model="claude-sonnet-4-6", messages=[{"role": "user", "content": "test"}],
+    optional_params={"max_tokens": 1024, "output_format": schema, "output_config": {"effort": "low"}},
+    litellm_params={}, headers={})
+out["p7_plain"] = config.transform_request(
+    model="claude-sonnet-4-6", messages=[{"role": "user", "content": "test"}],
+    optional_params={"max_tokens": 1024}, litellm_params={}, headers={})
 items = [
     {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "list files"}]},
     {"type": "function_call", "call_id": "c1", "name": "shell", "arguments": "{}"},
@@ -170,6 +181,14 @@ class ImportedPatchTests(unittest.TestCase):
         self.assertTrue(first.get("content"), self.out["p5"])
         self.assertIn("Listing", json.dumps(first.get("content")))
         self.assertEqual(self.out["p5"][-1].get("role"), "tool")
+
+    def test_p7_preserves_structured_schema_and_effort_without_deprecated_field(self):
+        data = self.out["p7"]
+        self.assertNotIn("output_format", data)
+        self.assertEqual(data["output_config"]["effort"], "low")
+        self.assertEqual(data["output_config"]["format"]["type"], "json_schema")
+        self.assertEqual(data["output_config"]["format"]["schema"]["required"], ["answer"])
+        self.assertNotIn("output_config", self.out["p7_plain"])
 
     def test_p4_exposes_only_allowlisted_copilot_metadata(self):
         copilot, plain = self.out["p4"]["copilot"], self.out["p4"]["plain"]

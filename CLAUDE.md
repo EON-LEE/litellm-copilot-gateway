@@ -6,7 +6,7 @@ GitHub Copilot 구독 모델을 Claude Code(`ccp`)와 Codex(`ccx`)에서 쓰는 
 
 - **OS 중립 유지** — 새 동작을 bash/PowerShell 스크립트로 추가하지 말고 패키지(파이썬)에 넣는다. 경로는 `pathlib`, 프로세스 조회는 `psutil`, 데이터는 `settings.data_dir()` 아래. 루트의 `*.sh`는 하위 호환 shim일 뿐 로직을 넣지 말 것.
 - **생성된 설정(`<data>/config.yaml`, `config-codex.yaml`)을 직접 수정하지 말 것** — `ccgw refresh`가 매번 재생성한다. 라우팅을 바꾸려면 `catalog.py`(`build_config`/`build_codex_config`)를 수정.
-- **LiteLLM 패치는 `litellm_patches.py`의 메모리 패치(P1–P6)로만** — site-packages를 수정하지 말 것. 앵커가 안 맞으면 `PatchError`로 기동을 거부해야 하며, 검증을 끄거나 느슨하게 만들지 말 것. LiteLLM 버전(`pyproject.toml` 고정)을 올리면 `ccgw doctor`와 테스트로 앵커를 확인.
+- **LiteLLM 패치는 `litellm_patches.py`의 메모리 패치(P1–P7)로만** — site-packages를 수정하지 말 것. 앵커가 안 맞으면 `PatchError`로 기동을 거부해야 하며, 검증을 끄거나 느슨하게 만들지 말 것. LiteLLM 버전(`pyproject.toml` 고정)을 올리면 `ccgw doctor`와 테스트로 앵커를 확인.
 - **small/fast 모델(gpt-4o-mini, haiku)의 capi(:4141) 라우팅을 깨지 말 것** — github_copilot 직결로 돌리면 Claude Code WebSearch가 400.
 - **명시적인 모델 이름을 다른 모델로 리다이렉트하지 말 것** — 공개는 현재 picker 모델만, 숨김 별칭은 동일 모델의 표기 차이·원본 ID·`[1m]`만. 종료된 모델은 오류.
 - **copilot-api는 검증된 2.6.15 고정** (`copilot_api.EXPECTED_VERSION`). 전용 prefix 설치만 쓰고 `npx`/`@latest`/전역 설치를 쓰지 말 것. 버전 변경 시 실제 번들의 identity 패치 앵커를 함께 검증. `useResponsesApiWebSocket=false` 고정(`enforce_http_transport`)을 끄지 말 것 — WebSocket 전송은 gpt-5-mini 스트리밍을 깨뜨린다.
