@@ -217,28 +217,24 @@ def seed_token(config_source, token_dir, environ=None):
 
 
 TRANSPORT_KEY = "useResponsesApiWebSocket"
+WEB_SEARCH_KEY = "messageApiWebSearchModel"
 
 
-def enforce_http_transport(path, config_source=None):
-    """Pin copilot-api to HTTP SSE for Responses streaming.
-
-    Copilot's ``ws:/responses`` transport fails mid-stream for some models
-    (gpt-5-mini: ``internal_error``) while HTTP SSE works for every model.
-    Only this one key is touched; returns True when the file was changed.
-    """
-    if config_source is not None and \
-            f"getConfig().{TRANSPORT_KEY} ?? true" not in config_source.read_text(encoding="utf-8"):
-        raise CopilotApiError(f"unexpected {TRANSPORT_KEY} handling; upstream may have changed")
+def _read_config(path):
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         raw = ""
-    config = json.loads(raw) if raw.strip() else {}
+    try:
+        config = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        raise CopilotApiError("Copilot API config must contain valid JSON") from None
     if not isinstance(config, dict):
         raise CopilotApiError("Copilot API config must be a JSON object")
-    if config.get(TRANSPORT_KEY) is False:
-        return False
-    config[TRANSPORT_KEY] = False
+    return config
+
+
+def _write_config(path, config):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -252,7 +248,69 @@ def enforce_http_transport(path, config_source=None):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def enforce_http_transport(path, config_source=None):
+    """Pin copilot-api to HTTP SSE for Responses streaming.
+
+    Copilot's ``ws:/responses`` transport fails mid-stream for some models
+    (gpt-5-mini: ``internal_error``) while HTTP SSE works for every model.
+    Only this one key is touched; returns True when the file was changed.
+    """
+    if config_source is not None and \
+            f"getConfig().{TRANSPORT_KEY} ?? true" not in config_source.read_text(encoding="utf-8"):
+        raise CopilotApiError(f"unexpected {TRANSPORT_KEY} handling; upstream may have changed")
+    config = _read_config(path)
+    if config.get(TRANSPORT_KEY) is False:
+        return False
+    config[TRANSPORT_KEY] = False
+    _write_config(path, config)
     return True
+
+
+def web_search_default(config_source):
+    """copilot-api's built-in Claude Code WebSearch model (exact expression, fail-closed)."""
+    literal = unique_match(r'getConfig\(\)\.' + WEB_SEARCH_KEY + r' \?\? ("(?:[^"\\]|\\.)*")',
+                           config_source.read_text(encoding="utf-8"), "web search model expression")
+    return json.loads(literal)
+
+
+def sync_web_search_model(path, config_source, available, override=None):
+    """Keep copilot-api's Claude Code WebSearch helper on a model this account offers.
+
+    copilot-api persists its defaults, so an older install keeps a retired
+    model (e.g. gpt-5-mini) and every WebSearch fails. An offered model, an
+    explicit "" (disabled) and provider aliases ("provider/model") are kept;
+    a retired one moves to copilot-api's own default. Only this key is
+    touched. Returns (old, new) when changed, (old, None) when nothing
+    offered can replace it, else None.
+    """
+    default = web_search_default(config_source)
+    config = _read_config(path)
+    current = config.get(WEB_SEARCH_KEY, default)
+    if not isinstance(current, str):
+        raise CopilotApiError(f"{WEB_SEARCH_KEY} in {path} must be a string")
+    if override:
+        if override not in available:
+            raise CopilotApiError(f"CCGW_WEBSEARCH_MODEL={override} is not an OpenAI Responses model "
+                                  "offered by this Copilot account (see `ccgw models`)")
+        target = override
+    elif not current.strip() or "/" in current or current in available:
+        return None
+    elif default in available:
+        target = default
+    else:
+        return current, None
+    if current == target:
+        return None
+    config[WEB_SEARCH_KEY] = target
+    _write_config(path, config)
+    return current, target
+
+
+def sync_installed_web_search(home, available, override=None, environ=None):
+    _, _, config = verify_package(package_dir(home))
+    return sync_web_search_model(config_path(config, environ), config, available, override)
 
 
 def prepare(home, token_dir, port, environ=None):

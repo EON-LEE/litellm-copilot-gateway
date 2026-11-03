@@ -50,8 +50,15 @@ def cmd_refresh(settings, args):
 
 
 def cmd_models(settings, args):
-    print(catalog.format_models(catalog.build_codex_config(catalog.fetch_catalog(settings.token_dir))))
+    from .clients import claude
+    value = catalog.fetch_catalog(settings.token_dir)
+    codex_config = catalog.build_codex_config(value)
+    print(catalog.format_models(codex_config))
     print("\nClaude Code (ccp) names: claude-<id> (Claude ids unchanged). Codex (ccx) names: the Copilot ID.")
+    defaults = claude.model_defaults(catalog.build_config(value))
+    slots = ", ".join(f"{family} {defaults.get(name, '-')}" for name, family in claude.FAMILY_VARS)
+    print(f"Defaults: ccp {defaults['ANTHROPIC_MODEL']} ({slots}); ccx {catalog.codex_default(codex_config) or '-'}"
+          "  ('-' = not offered by this account)")
     return 0
 
 

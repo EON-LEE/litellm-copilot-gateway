@@ -2,7 +2,7 @@
 
     ccx                         # interactive Codex TUI
     ccx exec "fix the tests"    # any codex arguments pass through
-    ccx -m claude-sonnet-5      # any Copilot model id (plain upstream ids)
+    ccx -m claude-sonnet-5.5    # any Copilot model id (plain upstream ids)
     ccx code [path]             # VS Code (separate profile) with the Codex extension on the gateway
     ccx --no-refresh ...        # skip the catalog refresh
 
@@ -27,21 +27,54 @@ TOP_BEGIN = "# >>> ccgw managed: provider selection (rewritten by ccx) >>>"
 TOP_END = "# <<< ccgw managed: provider selection <<<"
 TABLE_BEGIN = "# >>> ccgw managed: gateway provider (rewritten by ccx) >>>"
 TABLE_END = "# <<< ccgw managed: gateway provider <<<"
-PREFERRED = ("gpt-5.5", "gpt-5.4", "gpt-5-mini")
 
 
 def default_model(settings, environ=None):
+    """CCX_MODEL, else the most capable newest OpenAI Responses model in the live catalog."""
     environ = os.environ if environ is None else environ
     if environ.get("CCX_MODEL"):
         return environ["CCX_MODEL"]
     config = catalog.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))
-    names = [row["model_name"] for row in config["model_list"]]
-    for name in PREFERRED:
-        if name in names:
-            return name
+    chosen = catalog.codex_default(config)
+    if chosen:
+        return chosen
     responses = [row["model_name"] for row in config["model_list"]
                  if row["litellm_params"]["model"].startswith("openai/")]
-    return (responses or names)[0]
+    return (responses or [row["model_name"] for row in config["model_list"]])[0]
+
+
+def chosen_model(argv):
+    for index, arg in enumerate(argv):
+        if arg == "--":
+            break
+        if arg in ("-m", "--model"):
+            return argv[index + 1] if index + 1 < len(argv) else None
+        if arg.startswith("--model="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def saved_model(settings):
+    try:
+        parsed = tomllib.loads((settings.codex_home / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    value = parsed.get("model")
+    return value if isinstance(value, str) else None
+
+
+def model_warning(settings, argv):
+    """Warn about a model the account no longer offers; the saved choice is never rewritten."""
+    config = catalog.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))
+    served = {row["model_name"] for row in config["model_list"]} | set(config["router_settings"]["model_group_alias"])
+    model = chosen_model(argv)
+    source = "-m"
+    if model is None:
+        model, source = saved_model(settings), str(settings.codex_home / "config.toml")
+    if not model or model in served:
+        return None
+    return (f"⚠️  Codex model '{model}' ({source}) is not offered by this Copilot account; "
+            f"choose one with /model or `ccx -m {default_model(settings, {})}` (`ccgw models` lists them)")
 
 
 def _strip_block(text, begin, end):
@@ -156,9 +189,12 @@ def main(argv=None):
     try:
         gateway.ensure(settings, ["codex"], do_refresh=do_refresh)
         write_codex_home(settings, default_model(settings))
+        warning = model_warning(settings, argv)
     except (services.ServiceError, RuntimeError, OSError) as error:
         gateway.eprint(f"ERROR: {error}")
         return 1
+    if warning:
+        gateway.eprint(warning)
     env = codex_env(settings, settings.master_key())
     if argv[:1] == ["code"]:
         code = find_vscode()

@@ -4,7 +4,7 @@ import tempfile
 import tomllib
 import unittest
 
-from helpers import TempHome, catalog
+from helpers import TempHome, catalog, model
 
 from copilot_gateway import gateway, services
 from copilot_gateway.clients import claude, codex
@@ -15,6 +15,12 @@ class ClaudeLauncherTests(unittest.TestCase):
         self.home = TempHome()
         self.addCleanup(self.home.cleanup)
         self.settings = self.home.settings()
+        gateway.refresh(self.settings, catalog())
+
+    def config(self, value):
+        from copilot_gateway import catalog as cat
+        gateway.refresh(self.settings, value)
+        return cat.parse_rendered(self.settings.claude_config.read_text(encoding="utf-8"))
 
     def test_default_model_is_forced_unless_user_chose_one(self):
         self.assertEqual(claude.claude_args([], "claude-sonnet-5"),
@@ -33,17 +39,43 @@ class ClaudeLauncherTests(unittest.TestCase):
         self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "k")
         self.assertEqual(env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"], "1")
         self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-gpt-6-astra")
+        self.assertEqual(env["ANTHROPIC_MODEL"], "claude-sonnet-5")
         self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "claude-haiku-4.5")
-        self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "gpt-5-mini")
+        self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "claude-haiku-4.5")
+        self.assertNotIn("ANTHROPIC_DEFAULT_FABLE_MODEL", env)
 
     def test_default_models_exist_in_the_generated_config(self):
-        gateway.refresh(self.settings, catalog())
-        from copilot_gateway import catalog as cat
-        config = cat.parse_rendered(self.settings.claude_config.read_text(encoding="utf-8"))
+        config = claude.load_config(self.settings)
         names = {row["model_name"] for row in config["model_list"]}
-        names |= set(config["router_settings"]["model_group_alias"])
-        for value in claude.DEFAULTS.values():
+        for value in claude.model_defaults(config).values():
             self.assertIn(value, names)
+
+    def test_newest_family_version_wins_and_missing_family_stays_unset(self):
+        value = catalog()
+        value["data"] = [row for row in value["data"] if row["id"] != "claude-opus-5"]
+        value["data"] += [model("claude-sonnet-5.5", "Claude Sonnet 5.5", 1000000, 936000, 128000, ["/v1/messages"]),
+                          model("claude-haiku-5.5", "Claude Haiku 5.5", 1000000, 936000, 128000, ["/v1/messages"]),
+                          model("claude-opus-4.8-fast", "Claude Opus 4.8 fast", 1000000, 936000, 64000,
+                                ["/v1/messages"])]
+        env = claude.claude_env(self.settings, "k", base={}, config=self.config(value))
+        self.assertEqual((env["ANTHROPIC_MODEL"], env["ANTHROPIC_DEFAULT_SONNET_MODEL"]),
+                         ("claude-sonnet-5.5", "claude-sonnet-5.5"))
+        self.assertEqual((env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], env["ANTHROPIC_SMALL_FAST_MODEL"]),
+                         ("claude-haiku-5.5", "claude-haiku-5.5"))
+        self.assertNotIn("ANTHROPIC_DEFAULT_OPUS_MODEL", env)
+        self.assertIn("opus: not offered", claude.describe(env))
+
+    def test_main_model_falls_back_to_another_claude_family_only_when_sonnet_is_missing(self):
+        value = catalog()
+        value["data"] = [row for row in value["data"] if row["id"] != "claude-sonnet-5"]
+        self.assertEqual(claude.model_defaults(self.config(value))["ANTHROPIC_MODEL"], "claude-opus-5")
+
+    def test_unavailable_user_model_variables_are_reported(self):
+        config = claude.load_config(self.settings)
+        env = claude.claude_env(self.settings, "k", config=config, base={
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.6", "ANTHROPIC_MODEL": "sonnet",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5"})
+        self.assertEqual(claude.unavailable_models(env, config), [("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-4.6")])
 
 
 class CodexLauncherTests(unittest.TestCase):
@@ -84,11 +116,34 @@ class CodexLauncherTests(unittest.TestCase):
         env = codex.codex_env(self.settings, "k", base={})
         self.assertEqual(env, {"CODEX_HOME": str(home), "LITELLM_MASTER_KEY": "k"})
 
-    def test_default_model_prefers_env_then_known_gpt(self):
+    def test_default_model_prefers_env_then_most_capable_newest_openai(self):
         value = catalog()
         gateway.refresh(self.settings, value)
         self.assertEqual(codex.default_model(self.settings, {"CCX_MODEL": "claude-opus-5"}), "claude-opus-5")
-        self.assertEqual(codex.default_model(self.settings, {}), "gpt-5-mini")
+        self.assertEqual(codex.default_model(self.settings, {}), "gpt-6-astra")
+        value["data"] += [model("gpt-6.1-sol", "GPT-6.1 Sol", 1050000, 922000, 128000, ["/responses"],
+                                model_picker_category="powerful"),
+                          model("gpt-7-luna", "GPT-7 Luna", 1000000, 872000, 128000, ["/responses"],
+                                model_picker_category="lightweight")]
+        gateway.refresh(self.settings, value)
+        self.assertEqual(codex.default_model(self.settings, {}), "gpt-6.1-sol")
+
+    def test_retired_model_is_reported_but_never_rewritten(self):
+        gateway.refresh(self.settings, catalog())
+        home = codex.write_codex_home(self.settings, "gpt-5.5")
+        before = (home / "config.toml").read_text(encoding="utf-8")
+        warning = codex.model_warning(self.settings, [])
+        self.assertIn("'gpt-5.5'", warning)
+        self.assertIn("ccx -m gpt-6-astra", warning)
+        self.assertEqual((home / "config.toml").read_text(encoding="utf-8"), before)
+        self.assertIsNone(codex.model_warning(self.settings, ["exec", "-m", "gpt-6-astra", "hi"]))
+        self.assertIn("'gpt-4.1' (-m)", codex.model_warning(self.settings, ["--model=gpt-4.1"]))
+        self.assertIn("'gpt-5.5'", codex.model_warning(self.settings, ["exec", "--", "-m", "gpt-6-astra"]))
+        codex.write_codex_home(self.settings, "x")
+        self.assertIsNotNone(codex.model_warning(self.settings, []))
+        (home / "config.toml").write_text(before.replace('model = "gpt-5.5"', 'model = "claude-haiku-4-5"'),
+                                          encoding="utf-8")
+        self.assertIsNone(codex.model_warning(self.settings, []))
 
     def test_find_codex_honours_override(self):
         self.assertEqual(codex.find_codex({"CCX_CODEX": "/opt/codex"}), "/opt/codex")

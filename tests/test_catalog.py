@@ -130,6 +130,52 @@ class CodexConfigTests(unittest.TestCase):
         self.assertNotIn("callbacks", cat.build_config(value, CAPI)["litellm_settings"])
 
 
+class DefaultSelectionTests(unittest.TestCase):
+    def catalog(self):
+        value = catalog()
+        xai = model("grok-9", "Grok 9", 500000, 372000, 128000, ["/responses"], model_picker_category="powerful")
+        xai["vendor"] = "xAI"
+        value["data"] += [
+            model("claude-sonnet-5.5", "Claude Sonnet 5.5", 1000000, 936000, 128000, ["/v1/messages"]),
+            model("claude-opus-4.8-fast", "Claude Opus 4.8 fast", 1000000, 936000, 64000, ["/v1/messages"]),
+            model("gpt-6.1-sol", "GPT-6.1 Sol", 1050000, 922000, 128000, ["/responses"],
+                  model_picker_category="powerful"),
+            model("gpt-6.1-terra", "GPT-6.1 Terra", 1000000, 1000000, 128000, ["/responses"],
+                  model_picker_category="versatile"),
+            model("gpt-7-luna", "GPT-7 Luna", 1000000, 872000, 128000, ["/responses"],
+                  model_picker_category="lightweight"),
+            xai,
+        ]
+        return value
+
+    def test_category_is_kept_as_metadata_only_when_declared(self):
+        info = {r["model_name"]: r["model_info"] for r in cat.build_codex_config(self.catalog(), CAPI)["model_list"]}
+        self.assertEqual(info["gpt-6.1-sol"]["upstream_category"], "powerful")
+        self.assertNotIn("upstream_category", info["gpt-6-astra"])
+
+    def test_claude_families_pick_newest_plain_version(self):
+        for build in (cat.build_config, cat.build_codex_config):
+            with self.subTest(build=build.__name__):
+                self.assertEqual(cat.claude_families(build(self.catalog(), CAPI)),
+                                 {"opus": "claude-opus-5", "sonnet": "claude-sonnet-5.5", "haiku": "claude-haiku-4.5"})
+
+    def test_version_key_orders_numerically(self):
+        self.assertGreater(cat.version_key("claude-sonnet-5.5"), cat.version_key("claude-sonnet-5"))
+        self.assertGreater(cat.version_key("gpt-6.10-sol"), cat.version_key("gpt-6.9-sol"))
+        self.assertEqual(cat.version_key("no-digits"), ())
+
+    def test_codex_default_is_most_capable_then_newest_openai_responses_model(self):
+        self.assertEqual(cat.codex_default(cat.build_codex_config(self.catalog(), CAPI)), "gpt-6.1-sol")
+        self.assertEqual(cat.codex_default(cat.build_codex_config(catalog(), CAPI)), "gpt-6-astra")
+        claude_only = {"data": [row for row in catalog()["data"] if not row["id"].startswith("gpt-")]}
+        claude_only["data"] += [model(f"claude-x-{n}", "X", 200000, 136000, 64000, ["/v1/messages"]) for n in range(2)]
+        self.assertIsNone(cat.codex_default(cat.build_codex_config(claude_only, CAPI)))
+
+    def test_web_search_models_are_openai_responses_models_only(self):
+        self.assertEqual(cat.web_search_models(cat.build_codex_config(self.catalog(), CAPI)),
+                         ["gpt-5-mini", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-7-luna"])
+
+
 class RefreshTests(unittest.TestCase):
     def setUp(self):
         self.home = TempHome()

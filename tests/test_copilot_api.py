@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from copilot_gateway import copilot_api as capi
 from copilot_gateway.settings import data_dir
@@ -78,6 +79,115 @@ class IdentityPatchTests(unittest.TestCase):
         self.assertFalse(path.exists())
 
 
+class WebSearchModelTests(unittest.TestCase):
+    OFFERED = ["gpt-6-luna", "gpt-6.1-sol"]
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="capi-ws-")
+        self.addCleanup(self.temp.cleanup)
+        self.source = Path(self.temp.name) / "config.js"
+        self.source.write_text('\tconst model = getConfig().messageApiWebSearchModel ?? "gpt-6-luna";\n',
+                               encoding="utf-8")
+        self.path = Path(self.temp.name) / "config.json"
+
+    def write(self, value):
+        self.path.write_text(json.dumps(value), encoding="utf-8")
+        return self.path.read_text(encoding="utf-8")
+
+    def sync(self, available=None, override=None):
+        return capi.sync_web_search_model(self.path, self.source, self.OFFERED if available is None else available,
+                                          override)
+
+    def test_retired_model_moves_to_upstream_default_and_keeps_other_keys(self):
+        self.write({"messageApiWebSearchModel": "gpt-5-mini", "useResponsesApiWebSocket": False,
+                    "extraPrompts": {"gpt-5-mini": "x"}})
+        self.assertEqual(self.sync(), ("gpt-5-mini", "gpt-6-luna"))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")),
+                         {"messageApiWebSearchModel": "gpt-6-luna", "useResponsesApiWebSocket": False,
+                          "extraPrompts": {"gpt-5-mini": "x"}})
+        self.assertIsNone(self.sync())
+
+    def test_offered_disabled_and_provider_values_are_kept(self):
+        for value in ("gpt-6.1-sol", "", "openrouter/some-model"):
+            with self.subTest(value=value):
+                before = self.write({"messageApiWebSearchModel": value})
+                self.assertIsNone(self.sync())
+                self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_missing_config_relies_on_upstream_default_without_writing(self):
+        self.assertIsNone(self.sync())
+        self.assertEqual(self.sync(["gpt-6.1-sol"]), ("gpt-6-luna", None))
+        self.assertFalse(self.path.exists())
+
+    def test_unreplaceable_retired_model_is_reported_not_changed(self):
+        before = self.write({"messageApiWebSearchModel": "gpt-5-mini"})
+        self.assertEqual(self.sync(["gpt-6.1-sol"]), ("gpt-5-mini", None))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_override_must_be_an_offered_model(self):
+        self.write({"messageApiWebSearchModel": "gpt-6-luna"})
+        self.assertEqual(self.sync(override="gpt-6.1-sol"), ("gpt-6-luna", "gpt-6.1-sol"))
+        self.assertIsNone(self.sync(override="gpt-6.1-sol"))
+        with self.assertRaises(capi.CopilotApiError):
+            self.sync(override="gpt-5-mini")
+
+    def test_bad_values_and_unknown_upstream_fail_closed(self):
+        for config in ({"messageApiWebSearchModel": 1}, []):
+            with self.subTest(config=config):
+                before = self.write(config)
+                with self.assertRaises(capi.CopilotApiError):
+                    self.sync()
+                self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+        before = self.write({"messageApiWebSearchModel": "gpt-5-mini"})
+        self.source.write_text("return getConfig().webSearchModel;", encoding="utf-8")
+        with self.assertRaises(capi.CopilotApiError):
+            self.sync()
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+
+class GatewayWebSearchTests(unittest.TestCase):
+    def setUp(self):
+        from helpers import TempHome, catalog
+        self.home = TempHome()
+        self.addCleanup(self.home.cleanup)
+        self.settings = self.home.settings()
+        self.catalog = catalog
+
+    def test_sync_offers_only_openai_responses_models_and_honours_override(self):
+        from copilot_gateway import gateway
+        with mock.patch.object(gateway.copilot_api, "sync_installed_web_search") as sync:
+            self.assertFalse(gateway.sync_web_search(self.settings, log=lambda *_: None, environ={}))
+            sync.assert_not_called()
+            gateway.refresh(self.settings, self.catalog())
+            sync.return_value = ("gpt-5-mini", "gpt-6-astra")
+            messages = []
+            self.assertTrue(gateway.sync_web_search(self.settings, log=messages.append, environ={}))
+            sync.assert_called_with(self.settings.home, ["gpt-5-mini", "gpt-6-astra"], None, {})
+            self.assertIn("gpt-5-mini -> gpt-6-astra", messages[0])
+            (self.home.path / ".env").write_text("CCGW_WEBSEARCH_MODEL=gpt-6-astra\n", encoding="utf-8")
+            settings = self.home.settings()
+            gateway.sync_web_search(settings, log=messages.append, environ={})
+            self.assertEqual(sync.call_args.args[2], "gpt-6-astra")
+            gateway.sync_web_search(settings, log=messages.append, environ={"CCGW_WEBSEARCH_MODEL": "gpt-5-mini"})
+            self.assertEqual(sync.call_args.args[2], "gpt-5-mini")
+            sync.return_value = ("gpt-5-mini", None)
+            self.assertFalse(gateway.sync_web_search(settings, log=messages.append, environ={}))
+            self.assertIn("CCGW_WEBSEARCH_MODEL", messages[-1])
+
+    def test_running_capi_restarts_only_after_a_change(self):
+        from copilot_gateway import gateway, services
+        running = services.State("running", [])
+        for changed in (True, False):
+            with self.subTest(changed=changed), \
+                    mock.patch.object(gateway, "sync_web_search", return_value=changed), \
+                    mock.patch.object(gateway.services, "inspect", return_value=running), \
+                    mock.patch.object(gateway.services, "stop") as stop, \
+                    mock.patch.object(gateway.services, "start") as start:
+                gateway.start_capi(self.settings, {"capi": "capi-service"}, log=lambda *_: None)
+                self.assertEqual(stop.call_count, int(changed))
+                start.assert_called_once_with("capi-service", log=mock.ANY)
+
+
 def installed_package():
     home = os.environ.get("CCGW_TEST_HOME") or str(data_dir())
     package = capi.package_dir(home)
@@ -99,6 +209,7 @@ class InstalledBundleTests(unittest.TestCase):
             self.assertIn(capi.MARKER, server.read_text(encoding="utf-8"))
             self.assertFalse(capi.patch_identity(server))
             self.assertTrue(capi.enforce_http_transport(Path(temp) / "config.json", config))
+            self.assertRegex(capi.web_search_default(config), r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 if __name__ == "__main__":

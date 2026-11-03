@@ -45,19 +45,23 @@ npm i -g @openai/codex           # npm
 ## 사용법
 
 ```bash
-ccp                              # Claude Code (기본 claude-sonnet-5)
-ccp --model claude-gpt-5.5       # 다른 Copilot 모델
-ccx                              # Codex TUI (기본 gpt-5.5 계열)
-ccx -m claude-opus-5             # Codex에서 Claude
+ccp                              # Claude Code (기본: 계정에서 제공하는 최신 Sonnet)
+ccp --model claude-gpt-6.1-sol   # 다른 Copilot 모델
+ccx                              # Codex TUI (기본: 성능 등급이 가장 높은 최신 OpenAI 모델)
+ccx -m claude-sonnet-5.5         # Codex에서 Claude
 ccx exec "fix the failing test"  # codex 인자 그대로 전달
 ccx code .                       # VS Code(별도 프로필)에서 Codex 확장을 게이트웨이로
-ccgw models                      # 실제 모델명 · ID · 컨텍스트 · 입력/출력 한도
+ccgw models                      # 실제 모델명 · ID · 컨텍스트 · 입력/출력 한도 · 기본값
 ccgw status                      # 포트 · 소유 프로세스 · readiness
 ```
 
 - `ccp`/`ccx`는 실행마다 Copilot 카탈로그를 새로 받아 설정을 갱신하고(`--no-refresh`로 생략), 필요한 서비스만 띄운다. 갱신 실패 시 기존 설정으로 기동.
-- `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존. 기본값: opus=`claude-opus-5`, sonnet=`claude-sonnet-5`, haiku=`claude-haiku-4.5`, small-fast=`gpt-5-mini`.
-- `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로. 기본 모델 변경: `CCX_MODEL`. 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, Windows winget 패키지, 그다음 VS Code 확장 번들 `codex`).
+- `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존한다. 기본 모델은 코드에 고정하지 않고 실행할 때 받은 카탈로그에서 고른다.
+  - 메인 모델과 `sonnet`: 계정에서 제공하는 최신 Sonnet. Sonnet이 없으면 메인은 Opus, Haiku 순으로 고른다.
+  - `opus`·`haiku`·`fable`: 각 계열의 최신 버전(`-fast` 같은 변형 제외). 구버전 Claude Code가 읽는 `ANTHROPIC_SMALL_FAST_MODEL`은 `haiku`와 같다.
+  - 계정에 없는 계열은 설정하지 않는다. 그 슬롯을 고르면 오류가 나며, 다른 계열로 대체하지 않는다.
+  - 직접 지정한 모델 변수가 카탈로그에 없으면 실행할 때 경고한다.
+- `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로다. 첫 실행 때 `config.toml`에 저장하는 기본 모델은 `CCX_MODEL`, 없으면 카탈로그의 `powerful` 등급 OpenAI Responses 모델 중 최신 버전이다. 저장된 모델이나 `-m` 모델이 카탈로그에 없으면 경고만 하고 바꾸지 않는다(`/model` 또는 `ccx -m`으로 변경). 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, Windows winget 패키지, 그다음 VS Code 확장 번들 `codex`).
 - `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요).
 - 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
 
@@ -109,7 +113,7 @@ GitHub 토큰: `~/.config/litellm/github_copilot/` (`GITHUB_COPILOT_TOKEN_DIR`�
 
 - `model_picker_enabled=true`인 chat 모델만 공개. `Internal only` 및 `policy.state`가 비활성인 모델 제외. 고정 allowlist 없음 → 새 모델은 자동 반영.
 - **Claude Code (:4000)**: Claude Code는 ID에 `claude`가 있는 모델만 받으므로 비-Claude는 `claude-<Copilot ID>`로 공개(화면 이름은 실제 GPT/Gemini 이름), 원본 ID는 숨김 별칭. 전체 컨텍스트 ≥ 1M 모델은 `[1m]` 숨김 별칭.
-- **Codex (:4001)**: Copilot 원본 ID 그대로 (`gpt-5.5`, `claude-opus-5`, `gemini-3.8-flash` …). GPT(Responses) 모델은 copilot-api의 `/v1/responses`, Claude는 Messages, chat-only는 github_copilot provider. xAI(Grok)는 Responses 경로 + 미지원 툴 타입 제거 훅(아래 제약 참고).
+- **Codex (:4001)**: Copilot 원본 ID 그대로 (`gpt-6.1-sol`, `claude-sonnet-5.5`, `gemini-4-argon` …). GPT(Responses) 모델은 copilot-api의 `/v1/responses`, Claude는 Messages, chat-only는 github_copilot provider. xAI(Grok)는 Responses 경로 + 미지원 툴 타입 제거 훅(아래 제약 참고).
 - 같은 버전의 표기 차이만 허용(`claude-haiku-4-5` → 실제 `claude-haiku-4.5`). 다른 모델·구버전→신버전 대체 없음. 미등록·종료된 모델은 오류.
 - 한도는 카탈로그 선언값(컨텍스트·입력·출력·비스트리밍 출력)을 그대로 쓰고 추정하지 않음. 누락·형식 오류·충돌 시 갱신을 중단하고 기존 설정 유지(fail-closed). 내용이 같으면 파일을 다시 쓰지 않음.
 
@@ -119,6 +123,9 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 
 - 명시적 검색 보조 동작이며 일반 모델 대체가 아님. Haiku 일반 요청은 실제 Haiku로 간다.
 - 그래서 **small/fast · haiku 모델은 반드시 copilot-api(:4141) 경유**. LiteLLM `github_copilot` 직결로 바꾸면 WebSearch가 400.
+- copilot-api는 처음 실행할 때 기본값을 설정 파일(`config.json`)에 저장한다. 그래서 예전에 설치한 환경에는 종료된 보조 모델(예: `gpt-5-mini`)이 남고, 이 경우 WebSearch가 모두 실패한다.
+- 게이트웨이는 copilot-api를 시작하기 전에 `messageApiWebSearchModel`이 카탈로그의 OpenAI Responses 모델인지 확인한다. 아니면 copilot-api 기본값(2.6.15: `gpt-6-luna`)으로 바꾸고, 실행 중인 copilot-api를 재시작한다. 빈 값(비활성)과 `provider/model` 별칭은 유지한다.
+- 다른 보조 모델을 쓰려면 `CCGW_WEBSEARCH_MODEL`(환경변수 또는 `<data>/.env`)에 카탈로그의 OpenAI 모델을 지정한다. copilot-api 기본값도 계정에 없으면 경고만 하고 설정을 바꾸지 않는다.
 
 ## 알려진 제약
 
@@ -132,9 +139,9 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **Codex 비표준 모델 메타데이터**: Claude Sonnet 5에서 `Model metadata ... not found`와 fallback 경고를 관찰했다. `/v1/models`에 게시한 한도가 Codex 내부 컨텍스트·압축 기준에 자동 적용된다는 뜻이 아니며, 임의 모델의 최대 컨텍스트 사용을 보장하지 않는다.
 - **인증 오류 코드**: DB 없는 LiteLLM 1.95.0은 키 누락 500, 잘못된 키 400. 요청은 거부됨.
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
-- **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상). `ccgw start`가 copilot-api 설정의 `useResponsesApiWebSocket`만 `false`로 고정한다(다른 키는 건드리지 않음, 업스트림 기본값 형태가 바뀌면 시작 거부).
+- **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상, 2026-10 관찰). `ccgw start`가 copilot-api 설정에서 관리하는 키는 `useResponsesApiWebSocket`(`false` 고정)과 `messageApiWebSearchModel`(위 WebSearch 참고) 두 개뿐이다. 업스트림 기본값 표현이 바뀌면 시작을 거부한다.
 - **Codex Windows 샌드박스**: Codex의 Windows 네이티브 샌드박스를 설정하지 않으면(VS Code의 "Finish Windows setup" 등, OS 설정 변경) `-s workspace-write`도 쓰기·명령 실행이 거부된다. 게이트웨이와 무관한 Codex 동작이며, 설정을 마치거나 신뢰하는 폴더에서 `-s danger-full-access`를 쓴다. WSL/Linux/macOS는 해당 없음.
-- **Claude Code `[claude-code:unrecognized_model]` 경고**: WebSearch 보조 모델(gpt-5-mini 등 Claude 외 이름)에 대해 출력되는 Claude Code 측 정보성 경고. 요청은 정상 처리된다.
+- **Claude Code `[claude-code:unrecognized_model]` 경고**: WebSearch 보조 모델(`gpt-6-luna` 등 Claude 외 이름)에 대해 출력되는 Claude Code 측 정보성 경고. 요청은 정상 처리된다.
 - **ToS**: 에디터 외부의 Copilot API 사용은 비공식 영역. 개인·로컬·수동 규모로만 사용 권장.
 
 ## 검증 현황
@@ -145,6 +152,8 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | `ccx exec` 파일 생성+셸 실행 툴 루프, 공개 모델 **24/24** (Claude · GPT · Gemini · Grok · MAI) — WSL(Codex CLI 0.160) · Windows(VS Code 번들 codex.exe · winget Codex CLI 0.160) | ✅ (2026-10) |
 | `ccp -p` Write 툴 루프, 공개 모델 **24/24** — WSL · Windows | ✅ (2026-10) |
 | `ccp` WebSearch (실검색 결과) — WSL · Windows | ✅ (2026-10) |
+| 2026-11-03 카탈로그 재검토: 공개 19개(신규 `gpt-6.1-terra`, `mai-code-2`) — Claude·Codex 설정 생성, WSL 격리 기동, 세 서비스 `/v1/models` 노출 | ✅ (추론 미검증) |
+| 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`), 실행 중 copilot-api 재시작 — WSL 격리 기동 | ✅ (실검색 미검증) |
 | `ccx code` VS Code 확장 대화 — Windows | ✅ |
 | Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
 | web_fetch 서버 툴 | ❌ (위 제약) |

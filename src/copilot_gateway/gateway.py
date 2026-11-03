@@ -88,6 +88,35 @@ def config_for(settings, target):
     return settings.claude_config if target == "claude" else settings.codex_config
 
 
+def sync_web_search(settings, log=eprint, environ=None) -> bool:
+    """Point copilot-api's WebSearch helper at an offered model; True when its config changed."""
+    environ = os.environ if environ is None else environ
+    try:
+        config = catalog.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    override = environ.get("CCGW_WEBSEARCH_MODEL") or settings.file_values.get("CCGW_WEBSEARCH_MODEL")
+    result = copilot_api.sync_installed_web_search(settings.home, catalog.web_search_models(config),
+                                                   override, environ)
+    if result is None:
+        return False
+    old, new = result
+    if new is None:
+        log(f"⚠️  WebSearch model {old} is not offered by this Copilot account, so Claude Code WebSearch "
+            "will fail. Set CCGW_WEBSEARCH_MODEL to an OpenAI model from `ccgw models`.")
+        return False
+    log(f"WebSearch: {old} -> {new} (copilot-api {copilot_api.WEB_SEARCH_KEY})")
+    return True
+
+
+def start_capi(settings, table, log=eprint):
+    capi = table["capi"]
+    # copilot-api reads its config once, so a running instance must restart to pick up the change.
+    if sync_web_search(settings, log) and services.inspect(capi).status == "running":
+        services.stop(capi, log=log)
+    services.start(capi, log=log)
+
+
 def ensure(settings: Settings, targets, do_refresh=True, log=eprint) -> dict:
     """Make sure copilot-api and the requested LiteLLM instances run current configs."""
     key = settings.master_key()
@@ -108,7 +137,7 @@ def ensure(settings: Settings, targets, do_refresh=True, log=eprint) -> dict:
         if not config_for(settings, target).exists():
             raise services.ServiceError(f"no {config_for(settings, target)}; run `ccgw refresh`")
     table = build_services(settings, key)
-    services.start(table["capi"], log=log)
+    start_capi(settings, table, log=log)
     for target in targets:
         service = table[target]
         status = services.inspect(service).status

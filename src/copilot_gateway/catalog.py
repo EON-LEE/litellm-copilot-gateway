@@ -87,6 +87,7 @@ def select_models(catalog):
         limits = row["capabilities"].get("limits")
         if not isinstance(limits, dict):
             raise CatalogError(f"invalid limits for {model_id}")
+        category = row.get("model_picker_category")
         selected.append({
             "id": model_id, "name": " ".join(name.split()), "vendor": row.get("vendor"),
             "preview": row.get("preview") is True, "endpoints": endpoints,
@@ -94,6 +95,7 @@ def select_models(catalog):
             "prompt": token_limit(limits, "max_prompt_tokens", required=True),
             "output": token_limit(limits, "max_output_tokens", required=True),
             "non_streaming": token_limit(limits, "max_non_streaming_output_tokens"),
+            "category": category if isinstance(category, str) and category else None,
         })
     if not selected:
         raise CatalogError("no user-visible, policy-enabled models; refusing to replace config")
@@ -114,7 +116,8 @@ def model_info(row):
     }
     for key, value in (("max_context_window_tokens", row["context"]), ("max_input_tokens", row["prompt"]),
                        ("max_output_tokens", row["output"]),
-                       ("max_non_streaming_output_tokens", row["non_streaming"])):
+                       ("max_non_streaming_output_tokens", row["non_streaming"]),
+                       ("upstream_category", row.get("category"))):
         if value is not None:
             info[key] = value
     return info
@@ -199,6 +202,53 @@ def build_codex_config(catalog, capi_base="http://127.0.0.1:4141"):
     config = _assemble(select_models(catalog), lambda model_id: model_id, params_for, spellings, extra_info)
     config["litellm_settings"]["callbacks"] = [CODEX_CALLBACK]
     return config
+
+
+# Copilot's model_picker_category, most capable first.
+CATEGORY_RANK = ("powerful", "versatile", "lightweight")
+CLAUDE_FAMILIES = ("opus", "sonnet", "haiku", "fable")
+
+
+def version_key(model_id):
+    """Numeric version inside a model id: claude-sonnet-5.5 -> (5, 5), gpt-6.1-sol -> (6, 1)."""
+    match = re.search(r"\d+(?:\.\d+)*", model_id)
+    return tuple(int(part) for part in match.group().split(".")) if match else ()
+
+
+def claude_families(config):
+    """Newest plain Claude model per family this account offers; variants such as -fast are skipped."""
+    newest = {}
+    pattern = re.compile(r"claude-(" + "|".join(CLAUDE_FAMILIES) + r")-\d+(?:\.\d+)*")
+    for row in config["model_list"]:
+        name = row["model_name"]
+        match = pattern.fullmatch(name)
+        if not match or row["model_info"].get("upstream_model_id") != name:
+            continue
+        family = match.group(1)
+        if family not in newest or version_key(name) > version_key(newest[family]):
+            newest[family] = name
+    return newest
+
+
+def _openai_responses(row):
+    return (row["litellm_params"]["model"].startswith("openai/")
+            and row["model_info"].get("upstream_vendor") == "OpenAI")
+
+
+def codex_default(config):
+    """Codex config: the most capable (catalog category), then newest, OpenAI Responses model."""
+    def rank(row):
+        category = row["model_info"].get("upstream_category")
+        tier = CATEGORY_RANK.index(category) if category in CATEGORY_RANK else len(CATEGORY_RANK)
+        return -tier, version_key(row["model_name"]), row["model_name"]
+
+    candidates = [row for row in config["model_list"] if _openai_responses(row)]
+    return max(candidates, key=rank)["model_name"] if candidates else None
+
+
+def web_search_models(config):
+    """Codex config: models that can run Copilot's hosted web_search (OpenAI Responses; xAI rejects it)."""
+    return sorted(row["model_name"] for row in config["model_list"] if _openai_responses(row))
 
 
 def render(config) -> str:
