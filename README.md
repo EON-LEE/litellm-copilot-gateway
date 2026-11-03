@@ -152,13 +152,16 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | `ccx exec` 파일 생성+셸 실행 툴 루프, 공개 모델 **24/24** (Claude · GPT · Gemini · Grok · MAI) — WSL(Codex CLI 0.160) · Windows(VS Code 번들 codex.exe · winget Codex CLI 0.160) | ✅ (2026-10) |
 | `ccp -p` Write 툴 루프, 공개 모델 **24/24** — WSL · Windows | ✅ (2026-10) |
 | `ccp` WebSearch (실검색 결과) — WSL · Windows | ✅ (2026-10) |
-| 2026-11-03 카탈로그 재검토: 공개 19개(신규 `gpt-6.1-terra`, `mai-code-2`) — Claude·Codex 설정 생성, WSL 격리 기동, 세 서비스 `/v1/models` 노출 | ✅ (추론 미검증) |
-| 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`), 실행 중 copilot-api 재시작 — WSL 격리 기동 | ✅ (실검색 미검증) |
+| 2026-11-03 카탈로그 재검토: 공개 19개(신규 `gpt-6.1-terra`, `mai-code-2`) — Claude·Codex 설정 생성, WSL 격리 기동, 세 서비스 `/v1/models` 노출 | ✅ |
+| 신규 모델 `gpt-6.1-terra`·`mai-code-2`: `ccp -p` Write 툴 루프, `ccx exec` 파일 생성+셸 실행 — WSL(Claude Code 2.1.284 · Codex 0.160.0) | ✅ (2026-11) |
+| 카탈로그 기본값: `ccp` 메인 `claude-sonnet-5.5` Write 루프, haiku 슬롯 `claude-haiku-5.5` 응답, `ccx` 기본 `gpt-6.1-sol` 파일+셸 — WSL | ✅ (2026-11) |
+| 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`)과 실행 중 copilot-api 재시작, 교정 후 실검색(JSON·스트림, copilot-api 사용 기록에서 `gpt-6-luna` 확인) — WSL | ✅ (2026-11) |
 | `ccx code` VS Code 확장 대화 — Windows | ✅ |
 | Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
 | web_fetch 서버 툴 | ❌ (위 제약) |
 
 Windows의 `ccx exec` 루프는 Codex Windows 샌드박스 설정 없이 격리된 임시 폴더에서 `-s danger-full-access`로 실행했다(`workspace-write`는 아래 제약 참고).
+`(2026-10)` 행은 당시 공개 카탈로그(24개) 기준이다. 2026-11-03 카탈로그(19개)에서 실제 추론으로 다시 확인한 모델은 `(2026-11)` 행에 적은 모델뿐이며, Windows에서는 이번 변경의 유료 검증을 하지 않았다.
 
 ### 고급 기능 검증 범위 (2026-10-04)
 
