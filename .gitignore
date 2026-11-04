@@ -8,3 +8,13 @@ config.yaml.bak
 
 # Runtime logs
 *.log
+
+# Python test/runtime caches
+__pycache__/
+*.py[cod]
+
+# Local dev environments / builds
+.venv/
+dist/
+build/
+*.egg-info/

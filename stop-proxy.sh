@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
-# Stop both gateway services.
-pkill -f "litellm --config $HOME/litellm-copilot-gateway/config.yaml" 2>/dev/null && echo "litellm stopped" || echo "litellm not running"
-pkill -f "copilot-api.*start" 2>/dev/null && echo "copilot-api stopped" || echo "copilot-api not running"
+# Deprecated: kept so existing aliases keep working. Use ccgw stop.
+set -euo pipefail
+if ! command -v ccgw >/dev/null 2>&1; then
+  echo "ccgw not found. Install: uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway" >&2
+  exit 127
+fi
+exec ccgw stop "$@"

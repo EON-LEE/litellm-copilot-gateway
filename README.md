@@ -1,182 +1,212 @@
-# GitHub Copilot → Claude Code 게이트웨이
+# litellm-copilot-gateway
 
-GitHub Copilot 구독의 모델들(Claude, GPT-5.x, Gemini, Grok)을 Claude Code에서 쓰기 위한 로컬 전용(127.0.0.1) 게이트웨이. LiteLLM이 Claude Code용 Anthropic 호환 엔드포인트를 노출하고, 내부적으로 GitHub Copilot API로 요청을 라우팅한다.
+GitHub Copilot 구독 모델(Claude · GPT · Gemini · Grok …)을 **Claude Code**와 **OpenAI Codex**(CLI · VS Code 확장)에서 쓰는 로컬 게이트웨이.
+Windows 네이티브 · macOS · Linux · WSL 에서 **같은 명령**으로 동작한다 (WSL 불필요).
 
-## 설치 (처음 셋업 / 다른 macOS로 이전 시)
+| 명령 | 역할 |
+|---|---|
+| `ccp` | Copilot 백엔드로 Claude Code 실행 (평소 `claude`는 영향 없음) |
+| `ccx` | Copilot 백엔드로 Codex CLI 실행, `ccx code` = VS Code(별도 프로필) + Codex 확장 |
+| `ccgw` | 게이트웨이 관리: `setup` `login` `start` `stop` `restart` `status` `refresh` `models` `logs` `env` `doctor` `paths` |
 
-### 0. 사전 준비
-- **GitHub Copilot 구독**이 있는 GitHub 계정 (Individual/Business 무관, 이 저장소는 인증 방법을 다루지 않음 — 아래 2단계에서 이 리포와 무관하게 최초 1회 device-flow 로그인만 필요)
-- macOS + `zsh`/`bash`
-- `uv` (Python 툴 관리자) — `brew install uv`
-- `node`/`npx` (copilot-api 실행용) — `brew install node`
-- `jq`, `curl`, `lsof` (보통 macOS/homebrew에 기본 포함)
-- `gh` CLI (이 저장소를 클론/관리할 때만 필요, 게이트웨이 동작 자체와는 무관)
+## 설치
 
-### 1. 이 저장소 클론
+사전 준비: [uv](https://docs.astral.sh/uv/), Node.js 20+(`node`, `npm`), Copilot 구독 GitHub 계정, 쓰려는 클라이언트(`claude` 및/또는 `codex` 또는 VS Code `openai.chatgpt` 확장).
+
 ```bash
-git clone <이 저장소 URL> ~/litellm-copilot-gateway
-cd ~/litellm-copilot-gateway
+uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway
+ccgw setup      # 마스터키 생성 → copilot-api 2.6.15 설치 → GitHub device 로그인 → 모델 설정 생성
+ccgw doctor     # 전제조건 · LiteLLM 패치(P1–P7) · copilot-api 핀 확인
 ```
 
-### 2. litellm 설치 (fastapi 버전 고정 필수 — "litellm 업그레이드 시" 섹션 참고)
+PowerShell / bash / zsh 모두 동일. 업데이트는 `uv tool upgrade litellm-copilot-gateway`.
+LiteLLM은 패키지 의존성으로 **1.95.0 + fastapi 0.140.6**에 고정되어 함께 설치된다 (별도 `uv tool install litellm` 불필요).
+
+사내망 등에서 npm 미러에 `@jeffreycao/copilot-api@2.6.15`가 없으면:
+
+```powershell
+$env:CCGW_NPM_REGISTRY = "https://registry.npmjs.org/"       # 레지스트리 지정
+# 또는 다른 머신에서 `npm pack @jeffreycao/copilot-api@2.6.15` 한 tarball 사용
+$env:CCGW_COPILOT_API_SOURCE = "C:\path\jeffreycao-copilot-api-2.6.15.tgz"
+ccgw setup
+```
+
+Codex CLI는 npm 없이도 설치할 수 있다 (`ccx`가 자동으로 찾음):
+
+```powershell
+winget install OpenAI.Codex      # Windows (symlink 정책으로 `codex` 별칭이 안 생겨도 ccx가 패키지 폴더에서 찾음)
+# 또는 https://github.com/openai/codex/releases 의 codex-<arch>-pc-windows-msvc.exe / -unknown-linux-musl 바이너리를 PATH에 두거나 CCX_CODEX로 지정
+```
 ```bash
-uv tool install --python 3.13 'litellm[proxy]==1.95.0' --with 'fastapi==0.140.6'
-./apply-patches.sh     # 로컬 패치 3종 적용 (device-login 창, tool_choice, SSE 스트리밍 — "스크립트" 표 참고)
+brew install --cask codex        # macOS
+npm i -g @openai/codex           # npm
 ```
-
-### 3. 마스터 키 생성 (`.env`, git에 커밋되지 않음)
-```bash
-echo "LITELLM_MASTER_KEY=$(openssl rand -hex 32)" > .env
-chmod 600 .env
-```
-
-### 4. GitHub Copilot 최초 로그인 (최초 1회, device flow)
-```bash
-litellm --config config.yaml --host 127.0.0.1 --port 4000
-```
-콘솔에 뜨는 `https://github.com/login/device` 링크와 코드로 브라우저에서 로그인 완료 후 `Ctrl+C`로 종료. `~/.config/litellm/github_copilot/`에 토큰이 저장된다 (이후로는 자동 갱신, 재로그인 불필요 — 아래 "재로그인 필요 여부" 참고).
-> 참고: 최초 실행 시 `config.yaml`이 아직 없으므로, 먼저 `./refresh-models.sh`를 한 번 실패시켜서라도 실행해 이 로그인 절차를 트리거하거나, `refresh-models.sh`가 내부적으로 쓰는 것과 동일한 토큰 발급 절차를 거치면 된다. 가장 간단한 방법은 5단계의 `refresh-models.sh`를 먼저 실행하는 것 — 최초 실행 시 아직 `~/.config/litellm/github_copilot/access-token`이 없으면 안내 메시지가 뜬다.
-
-### 5. 모델 목록 생성 + 스택 기동
-```bash
-./refresh-models.sh      # Copilot 최신 모델 목록으로 config.yaml 생성
-./start-proxy.sh         # copilot-api(:4141) + litellm(:4000) 기동
-```
-
-### 6. Claude Code 실행
-```bash
-./claude-copilot.sh
-```
-
-## 아키텍처
-
-```
-Claude Code ──/v1/messages──▶ litellm :4000 (127.0.0.1, 인증: .env의 마스터키)
-                                │
-                                ├─ claude-* ──────────────┐
-                                ├─ responses 전용(gpt-5.x, │   anthropic/<id>
-                                │   codex, grok, mai) ────┤──▶ copilot-api :4141
-                                ├─ gpt-4o-mini,           │      ├─ claude-* → Copilot 네이티브 /v1/messages (thinking 보존)
-                                │   haiku 별칭 ───────────┘      ├─ web_search 단독 요청 → GPT /responses 재라우팅 (실검색)
-                                │                                └─ 그 외    → Copilot /responses (자동 번역)
-                                └─ 일반 chat 모델(gemini,
-                                    gpt-4o/4.1/3.5) ──────▶ github_copilot provider → Copilot /chat/completions
-```
-
-- **litellm 1.95.0** + **fastapi==0.140.6** (0.140.7+는 `get_flat_dependant` 제거로 부팅 실패 — litellm#35763)
-- **copilot-api** = `@jeffreycao/copilot-api` (caozhiyuan/copilot-api) — responses 전용 모델 번역 담당
-- 모든 비-claude 모델에는 `claude-<이름>` 별칭이 있음 (Claude Code `/model` 피커가 claude*/anthropic* ID만 표시하기 때문)
 
 ## 사용법
 
 ```bash
-~/litellm-copilot-gateway/start-proxy.sh        # 스택 기동 (이미 떠있으면 스킵)
-~/litellm-copilot-gateway/claude-copilot.sh     # Copilot 백엔드로 Claude Code 실행
-~/litellm-copilot-gateway/claude-copilot.sh --model gpt-5.5   # 모델 지정
+ccp                              # Claude Code (기본: 계정에서 제공하는 최신 Sonnet)
+ccp --model claude-gpt-6.1-sol   # 다른 Copilot 모델
+ccx                              # Codex TUI (기본: 성능 등급이 가장 높은 최신 OpenAI 모델)
+ccx -m claude-sonnet-5.5         # Codex에서 Claude
+ccx exec "fix the failing test"  # codex 인자 그대로 전달
+ccx code .                       # VS Code(별도 프로필)에서 Codex 확장을 게이트웨이로
+ccgw models                      # 실제 모델명 · ID · 컨텍스트 · 입력/출력 한도 · 기본값
+ccgw status                      # 포트 · 소유 프로세스 · readiness
 ```
 
-### 셸 알리아스 (선택)
+- `ccp`/`ccx`는 실행마다 Copilot 카탈로그를 새로 받아 설정을 갱신하고(`--no-refresh`로 생략), 필요한 서비스만 띄운다. 갱신 실패 시 기존 설정으로 기동.
+- `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존한다. 기본 모델은 코드에 고정하지 않고 실행할 때 받은 카탈로그에서 고른다.
+  - 메인 모델과 `sonnet`: 계정에서 제공하는 최신 Sonnet. Sonnet이 없으면 메인은 Opus, Haiku 순으로 고른다.
+  - `opus`·`haiku`·`fable`: 각 계열의 최신 버전(`-fast` 같은 변형 제외). 구버전 Claude Code가 읽는 `ANTHROPIC_SMALL_FAST_MODEL`은 `haiku`와 같다.
+  - 계정에 없는 계열은 설정하지 않는다. 그 슬롯을 고르면 오류가 나며, 다른 계열로 대체하지 않는다.
+  - 직접 지정한 모델 변수가 카탈로그에 없으면 실행할 때 경고한다.
+- `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로다. 첫 실행 때 `config.toml`에 저장하는 기본 모델은 `CCX_MODEL`, 없으면 카탈로그의 `powerful` 등급 OpenAI Responses 모델 중 최신 버전이다. 저장된 모델이나 `-m` 모델이 카탈로그에 없으면 경고만 하고 바꾸지 않는다(`/model` 또는 `ccx -m`으로 변경). 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, Windows winget 패키지, 그다음 VS Code 확장 번들 `codex`).
+- `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요).
+- 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
 
-`~/.zshrc`(macOS) 또는 `~/.bash_aliases`(Linux/WSL)에 추가:
+### 기존 bash 버전에서 이전
 
-```bash
-# litellm-copilot-gateway
-alias claude-copilot="$HOME/litellm-copilot-gateway/claude-copilot.sh"
-alias ccp="$HOME/litellm-copilot-gateway/claude-copilot.sh"
-alias copilot-start="$HOME/litellm-copilot-gateway/start-proxy.sh"
-alias copilot-stop="$HOME/litellm-copilot-gateway/stop-proxy.sh"
-alias copilot-restart="$HOME/litellm-copilot-gateway/restart-proxy.sh"
-alias copilot-models="$HOME/litellm-copilot-gateway/list-models.sh"
-alias copilot-refresh="$HOME/litellm-copilot-gateway/refresh-models.sh && $HOME/litellm-copilot-gateway/restart-proxy.sh"
+예전 `~/litellm-copilot-gateway/*.sh`는 새 명령으로 넘겨주는 얇은 shim으로 남아 있어 기존 알리아스(`ccp=…/claude-copilot.sh`)도 동작한다. 새 설치 후에는 알리아스를 지우고 `ccp`/`ccx`/`ccgw`를 직접 쓰면 된다.
+
+- 마스터키: 레거시 `~/litellm-copilot-gateway/.env`의 키를 첫 실행 때 그대로 가져온다.
+- 로그인 토큰: 같은 위치(`~/.config/litellm/github_copilot`)를 재사용 → 재로그인 불필요.
+- 포트 4000에 bash 시절 LiteLLM이 떠 있으면 `ccgw restart claude`가 확인 후 교체한다.
+
+## 아키텍처
+
+```
+Claude Code ─/v1/messages──▶ LiteLLM :4000 (Anthropic API) ─┐
+Codex CLI/VS Code ─/v1/responses─▶ LiteLLM :4001 (Responses) ─┼─▶ copilot-api :4141 ─▶ api.githubcopilot.com
+                                                             └─▶ github_copilot provider (chat-only 모델)
 ```
 
-적용: `source ~/.bash_aliases` (또는 새 셸) 후 `ccp`로 바로 실행.
+- 모든 서비스는 `127.0.0.1` 전용, LiteLLM은 마스터키 인증. 포트: `CCGW_PORT`/`CCGW_CODEX_PORT`/`CCGW_CAPI_PORT`.
+- **LiteLLM 패치는 메모리에서 적용**: 게이트웨이가 띄우는 LiteLLM 프로세스에서만 import 시점에 소스를 앵커 치환한다. site-packages를 수정하지 않으므로 업그레이드로 지워지지 않고, 앵커가 바뀌면 기동 자체를 거부한다.
+- **copilot-api는 전용 prefix에 2.6.15 고정 설치**(`<data>/copilot-api/2.6.15`). 전역 npm/`npx @latest`를 쓰지 않는다. 기동 전 번들의 암묵적 small-model 교체를 원자적으로 패치하고, `modelMappings`/`claudeAutoModel` 설정이 있으면 기동 거부.
+- 프로세스 정지는 포트 소유 PID의 명령줄을 검증한 뒤 그 PID(와 동일 명령의 venv 런처 부모)에만 신호. 다른 프로세스는 거부하고 강제 종료하지 않는다.
 
-- 세션 안: `/model`로 전환 (피커의 `claude-gpt-...` 별칭 = 해당 GPT 모델)
-- 평소 `claude` 명령(진짜 Anthropic)은 영향 없음 — 환경변수는 이 스크립트의 자식 프로세스에만 적용
-- 기본값: main=`claude-sonnet-5`, opus=`claude-opus-5`, haiku/small-fast=`gpt-5-mini` (gpt-4o-mini는 Copilot 카탈로그에서 빠진 레거시 ID — 텍스트는 되지만 이미지 요청이 업스트림 400이라 승격함. gpt-5-mini는 비전·웹서치·스트리밍 모두 정상)
-- `claude-copilot.sh`는 항상 `--dangerously-skip-permissions`로 실행됨 (권한 프롬프트 없이 자동 승인 — Copilot 백엔드 전용 로컬 세션이므로 실제 Anthropic `claude` 명령에는 영향 없음)
+| 패치 | 대상 | 내용 |
+|---|---|---|
+| P1 | github_copilot authenticator | device 로그인 대기 1분 → 10분 |
+| P2 | Anthropic→OpenAI 어댑터 | 툴 변환 후 툴이 없으면 강제 `tool_choice` 제거 (WebSearch 400) |
+| P3 | Anthropic SSE 어댑터 | Copilot의 usage-only 빈 `choices` 청크 처리 (스트리밍 크래시) |
+| P4 | `/v1/models` | 허용 목록의 Copilot 표시명·설명·컨텍스트 노출 (Claude Code 모델 피커) |
+| P5 | Responses→Chat 변환 | Codex 히스토리의 빈 assistant 메시지 제거 · 텍스트를 tool call 앞으로 (Claude prefill 400) |
+| P6 | Responses 스트림 | reasoning/tool call로 시작한 스트림에서도 message item 생성 (Codex 텍스트 유실) |
+| P7 | Anthropic 구조화 출력 | 폐기된 `output_format`을 `output_config.format`으로 이동, effort 보존 (Codex→Claude JSON 스키마 400) |
 
-## 스크립트
+### 데이터 위치 (`ccgw paths`)
 
-| 파일 | 역할 |
+| OS | 기본 경로 (`CCGW_HOME`으로 변경) |
 |---|---|
-| `start-proxy.sh` | copilot-api(:4141) + litellm(:4000) 기동, 둘 다 127.0.0.1 전용 |
-| `stop-proxy.sh` / `restart-proxy.sh` | 정지 / litellm만 재시작(설정 리로드) |
-| `claude-copilot.sh` | Claude Code 런처 (게이트웨이 자동 기동 + 실행마다 모델 목록 자동 refresh 포함) |
-| `refresh-models.sh` | Copilot 실시간 목록으로 config.yaml 재생성 (fail-closed, 백업 후 원자적 교체) |
-| `list-models.sh` | 현재 Copilot 모델 + 엔드포인트 + 컨텍스트 크기 조회 |
-| `apply-patches.sh` | litellm 업그레이드 후 로컬 패치 재적용 (Patch 1: device-login 창 1분→10분, Patch 2: 빈 tools에 남은 tool_choice 제거, Patch 3a/3b: SSE 스트리밍 빈 choices 청크 가드) |
+| Windows | `%LOCALAPPDATA%\copilot-gateway` |
+| macOS | `~/Library/Application Support/copilot-gateway` |
+| Linux/WSL | `${XDG_DATA_HOME:-~/.local/share}/copilot-gateway` |
 
-## 새 모델이 나오면
+`.env`(마스터키), `config.yaml`(Claude용), `config-codex.yaml`(Codex용, 자동 생성 — 직접 편집 금지), `logs/`, `codex/`(CODEX_HOME), `copilot-api/`.
+GitHub 토큰: `~/.config/litellm/github_copilot/` (`GITHUB_COPILOT_TOKEN_DIR`로 변경).
 
-`claude-copilot.sh`(`ccp`)는 실행할 때마다 자동으로 아래를 먼저 돌리므로, 평소엔 아무것도 안 해도 새 모델이 반영된다:
+## 모델 1:1 매핑
 
-```bash
-~/litellm-copilot-gateway/refresh-models.sh && ~/litellm-copilot-gateway/restart-proxy.sh
-```
-목록에 없어도 와일드카드(`github_copilot/*`)가 chat 호환 모델은 즉시 처리하지만, **responses 전용 신모델(gpt-6-astra 같은)은 와일드카드가 못 받는다** — capi 라우팅이 필요해서 refresh 전엔 아예 안 됨. Claude Code를 거치지 않고 게이트웨이만 갱신하고 싶을 때 위 명령을 수동으로 돌려도 된다.
+**Copilot 실제 모델 1개 = 선택 항목 1개 = 실제 호출 대상 1개.**
 
-## litellm 업그레이드 시 (주의)
+- `model_picker_enabled=true`인 chat 모델만 공개. `Internal only` 및 `policy.state`가 비활성인 모델 제외. 고정 allowlist 없음 → 새 모델은 자동 반영.
+- **Claude Code (:4000)**: Claude Code는 ID에 `claude`가 있는 모델만 받으므로 비-Claude는 `claude-<Copilot ID>`로 공개(화면 이름은 실제 GPT/Gemini 이름), 원본 ID는 숨김 별칭. 전체 컨텍스트 ≥ 1M 모델은 `[1m]` 숨김 별칭.
+- **Codex (:4001)**: Copilot 원본 ID 그대로 (`gpt-6.1-sol`, `claude-sonnet-5.5`, `gemini-4-argon` …). GPT(Responses) 모델은 copilot-api의 `/v1/responses`, Claude는 Messages, chat-only는 github_copilot provider. xAI(Grok)는 Responses 경로 + 미지원 툴 타입 제거 훅(아래 제약 참고).
+- 같은 버전의 표기 차이만 허용(`claude-haiku-4-5` → 실제 `claude-haiku-4.5`). 다른 모델·구버전→신버전 대체 없음. 미등록·종료된 모델은 오류.
+- 한도는 카탈로그 선언값(컨텍스트·입력·출력·비스트리밍 출력)을 그대로 쓰고 추정하지 않음. 누락·형식 오류·충돌 시 갱신을 중단하고 기존 설정 유지(fail-closed). 내용이 같으면 파일을 다시 쓰지 않음.
 
-```bash
-uv tool install --python 3.13 'litellm[proxy]==<ver>' --with 'fastapi==0.140.6'
-~/litellm-copilot-gateway/apply-patches.sh     # 패치 재적용 필수
-~/litellm-copilot-gateway/restart-proxy.sh
-```
-fastapi 핀은 litellm#35763 (PR #35389/#35139/#35773/#35858 중 하나) 머지 후 제거 가능.
+## WebSearch 동작 방식
 
-## WebSearch 동작 방식 (2026-08 검증)
+Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)이지만, copilot-api의 `messageApiWebSearchModel` 기능이 web_search 단독 `/v1/messages` 요청을 Responses 지원 GPT 모델의 hosted `web_search`로 재라우팅하고 결과를 `server_tool_use` + `web_search_tool_result`로 재구성한다(외부 검색 API 키 불필요).
 
-Claude Code의 WebSearch는 Anthropic 서버가 실행하는 서버사이드 툴(`web_search_20250305`)이라 Copilot 백엔드로는 원래 불가능하지만, **copilot-api에 내장된 `messageApiWebSearchModel` 기능**(기본값 `gpt-5-mini`, config 불필요)이 이를 해결한다: web_search가 유일한 툴인 `/v1/messages` 요청을 감지하면 Responses 지원 GPT 모델의 Copilot `/responses`로 재라우팅하고, OpenAI의 네이티브 hosted `web_search` 툴(서버사이드 실검색, 외부 검색 API 키 불필요)을 실행한 뒤 결과를 Anthropic 네이티브 포맷(`server_tool_use` + `web_search_tool_result`)으로 재구성해 돌려준다. 스트리밍 포함 동작 검증 완료.
-
-**단, 요청이 copilot-api(:4141)를 거쳐야만 동작한다.** litellm의 github_copilot 직결 경로는 이 툴 형태를 번역하지 못해 400("tools are required when tool choice is specified")이 나므로, WebSearch가 흘러가는 small/fast 모델(`gpt-4o-mini`, haiku 별칭)은 반드시 capi 라우팅을 유지할 것 (`refresh-models.sh`가 처리).
+- 명시적 검색 보조 동작이며 일반 모델 대체가 아님. Haiku 일반 요청은 실제 Haiku로 간다.
+- 그래서 **small/fast · haiku 모델은 반드시 copilot-api(:4141) 경유**. LiteLLM `github_copilot` 직결로 바꾸면 WebSearch가 400.
+- copilot-api는 처음 실행할 때 기본값을 설정 파일(`config.json`)에 저장한다. 그래서 예전에 설치한 환경에는 종료된 보조 모델(예: `gpt-5-mini`)이 남고, 이 경우 WebSearch가 모두 실패한다.
+- 게이트웨이는 copilot-api를 시작하기 전에 `messageApiWebSearchModel`이 카탈로그의 OpenAI Responses 모델인지 확인한다. 아니면 copilot-api 기본값(2.6.15: `gpt-6-luna`)으로 바꾸고, 실행 중인 copilot-api를 재시작한다. 빈 값(비활성)과 `provider/model` 별칭은 유지한다.
+- 다른 보조 모델을 쓰려면 `CCGW_WEBSEARCH_MODEL`(환경변수 또는 `<data>/.env`)에 카탈로그의 OpenAI 모델을 지정한다. copilot-api 기본값도 계정에 없으면 경고만 하고 설정을 바꾸지 않는다.
 
 ## 알려진 제약
 
-- **web_fetch 서버 툴**(`web_fetch_20250910`): 게이트웨이 전체에서 불가 — claude-* 경로는 Copilot이 400("rejected tool(s): web_fetch"), GPT 경로는 copilot-api 크래시(500). 단 Claude Code의 WebFetch 툴은 CLI가 직접 URL을 가져오는 클라이언트 실행 방식이라 실사용 영향 없음.
-- **web_search + 다른 툴 혼합 요청**: copilot-api가 web_search를 조용히 제거(검색 미실행, 에러는 없음). Claude Code는 웹서치를 단독 요청으로 보내므로 실사용 무관. 혼합 + tool_choice로 web_search 강제 시엔 400.
-- **count_tokens**: 로컬 근사치 — tools 배열은 토큰 계산에서 무시되므로 툴 많은 요청은 과소집계. Claude Code의 컨텍스트 추적 용도로는 충분.
-- **github_copilot 직결 경로 usage**: input_tokens가 실제보다 크게 과소보고됨 (~1700토큰 프롬프트가 17로 찍힘) — 이 경로 모델들의 비용 집계는 신뢰 불가.
-- **동시 요청 응답 혼선(1회 관측)**: 병렬 부하 중 opus 요청에 sonnet 응답이 온 사례 1회. 재현 안 됨. 여러 세션 동시 사용 중 엉뚱한 응답이 오면 이걸 의심할 것.
-- **grok-4.5**: tools 없는 bare 요청은 copilot-api 버그(tool_choice without tools)로 400. Claude Code는 항상 tools를 보내므로 실사용 무관.
-- **mai-code-1-flash**: Copilot 쪽에서 완전히 죽어있음(양쪽 400). `mai-code-1-flash-picker`를 쓸 것 (config에서 bare 이름은 제외됨).
-- **litellm github_copilot 네이티브 /v1/messages 경로**: "unknown Copilot-Integration-Id"로 깨져 있어(1.95.0) claude-*는 copilot-api 경유로 우회 중. 업스트림 수정 시 단순화 가능.
-- **ToS**: 에디터 외부에서 Copilot API 사용은 GitHub 비공식 영역. 개인·로컬·수동 규모에선 관찰된 최악 사례가 "경고 메일 → Copilot 일시정지" 수준이지만, 대량/병렬 트래픽·외부 공유는 위험 가중. 로컬 단독 사용 유지 권장.
+- **web_fetch 서버 툴**: 게이트웨이 전체에서 불가. Claude Code의 WebFetch는 클라이언트 실행이라 실사용 영향 없음.
+- **web_search + 다른 툴 혼합 요청**: copilot-api가 web_search를 조용히 제거. Claude Code는 단독으로 보내므로 무관.
+- **count_tokens**: 로컬 근사치(tools 미집계). `Anthropic CountTokens API error: 401` 경고는 무해.
+- **github_copilot 직결 경로 usage**: input_tokens 과소보고 → 비용 집계 신뢰 불가.
+- **grok**: tools 없는 bare 요청은 copilot-api 버그로 400. 에이전트는 항상 tools를 보내므로 무관.
+- **grok + Codex**: Copilot의 xAI `/responses`가 Codex의 `namespace`(멀티 에이전트) 툴과 hosted `web_search` 툴을 400/422로 거부. Codex 설정은 xAI 모델에 한해 이 두 툴만 요청에서 제거(`copilot_gateway.hooks`, 카탈로그 `unsupported_tool_types`). 셸·파일 편집 등 나머지 툴은 정상, Grok에서는 Codex 웹검색·서브에이전트만 불가.
+- **Codex→Messages/Chat 변환 경로의 namespace 툴**: LiteLLM 1.95.0은 Responses의 `namespace`를 변환할 수 없어 삭제한다. Claude Sonnet 5에서 Codex MCP·서브에이전트 실패를 실제 재현했다. MCP의 네임스페이스 툴도 해당하며, 다른 Chat 변환 모델도 이 제약을 공유한다. Claude Code의 MCP·Agent 툴과는 다른 경로다.
+- **Codex 비표준 모델 메타데이터**: Claude Sonnet 5에서 `Model metadata ... not found`와 fallback 경고를 관찰했다. `/v1/models`에 게시한 한도가 Codex 내부 컨텍스트·압축 기준에 자동 적용된다는 뜻이 아니며, 임의 모델의 최대 컨텍스트 사용을 보장하지 않는다.
+- **인증 오류 코드**: DB 없는 LiteLLM 1.95.0은 키 누락 500, 잘못된 키 400. 요청은 거부됨.
+- **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
+- **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상, 2026-10 관찰). `ccgw start`가 copilot-api 설정에서 관리하는 키는 `useResponsesApiWebSocket`(`false` 고정)과 `messageApiWebSearchModel`(위 WebSearch 참고) 두 개뿐이다. 업스트림 기본값 표현이 바뀌면 시작을 거부한다.
+- **Codex Windows 샌드박스**: Codex의 Windows 네이티브 샌드박스를 설정하지 않으면(VS Code의 "Finish Windows setup" 등, OS 설정 변경) `-s workspace-write`도 쓰기·명령 실행이 거부된다. 게이트웨이와 무관한 Codex 동작이며, 설정을 마치거나 신뢰하는 폴더에서 `-s danger-full-access`를 쓴다. WSL/Linux/macOS는 해당 없음.
+- **Claude Code `[claude-code:unrecognized_model]` 경고**: WebSearch 보조 모델(`gpt-6-luna` 등 Claude 외 이름)에 대해 출력되는 Claude Code 측 정보성 경고. 요청은 정상 처리된다.
+- **ToS**: 에디터 외부의 Copilot API 사용은 비공식 영역. 개인·로컬·수동 규모로만 사용 권장.
 
-## 기능 검증 현황 (2026-08-05, 33개 테스트)
+## 검증 현황
 
-| 기능 | 상태 |
+| 항목 | 상태 |
 |---|---|
-| 스트리밍 (SSE) | ✅ 전 라우트 (Patch 3a/3b 적용 후) |
-| 툴콜 왕복 / 멀티툴 / 병렬 툴콜 | ✅ 전 라우트 |
-| WebSearch (실검색) | ✅ capi 경로, 스트리밍 포함 |
-| Extended thinking / interleaved | ✅ (budget_tokens는 Copilot adaptive로 변환 — 쉬운 질문엔 생각 생략, 정상) |
-| 비전 (이미지 입력) | ✅ claude-*/gpt-5-mini/gemini (gpt-4o·gpt-4o-mini는 업스트림 카탈로그 제외로 불가) |
-| 프롬프트 캐싱 | ✅ claude-* 실캐싱 (write→hit→증분), 기타 경로는 무해하게 수용/제거 |
-| count_tokens, [1m] 변형, stop_sequences, metadata | ✅ |
-| web_fetch 서버 툴 | ❌ (위 "알려진 제약" 참고, 실사용 영향 없음) |
+| 기동/정지/재시작 (3 서비스) — Windows 네이티브 · WSL Ubuntu | ✅ |
+| `ccx exec` 파일 생성+셸 실행 툴 루프, 공개 모델 **24/24** (Claude · GPT · Gemini · Grok · MAI) — WSL(Codex CLI 0.160) · Windows(VS Code 번들 codex.exe · winget Codex CLI 0.160) | ✅ (2026-10) |
+| `ccp -p` Write 툴 루프, 공개 모델 **24/24** — WSL · Windows | ✅ (2026-10) |
+| `ccp` WebSearch (실검색 결과) — WSL · Windows | ✅ (2026-10) |
+| 2026-11-03 카탈로그 재검토: 공개 19개(신규 `gpt-6.1-terra`, `mai-code-2`) — Claude·Codex 설정 생성, WSL 격리 기동, 세 서비스 `/v1/models` 노출 | ✅ |
+| 신규 모델 `gpt-6.1-terra`·`mai-code-2`: `ccp -p` Write 툴 루프, `ccx exec` 파일 생성+셸 실행 — WSL(Claude Code 2.1.284 · Codex 0.160.0) | ✅ (2026-11) |
+| 카탈로그 기본값: `ccp` 메인 `claude-sonnet-5.5` Write 루프, haiku 슬롯 `claude-haiku-5.5` 응답, `ccx` 기본 `gpt-6.1-sol` 파일+셸 — WSL | ✅ (2026-11) |
+| 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`)과 실행 중 copilot-api 재시작, 교정 후 실검색(JSON·스트림, copilot-api 사용 기록에서 `gpt-6-luna` 확인) — WSL | ✅ (2026-11) |
+| `ccx code` VS Code 확장 대화 — Windows | ✅ |
+| Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
+| web_fetch 서버 툴 | ❌ (위 제약) |
 
-## 재로그인이 필요한가?
+Windows의 `ccx exec` 루프는 Codex Windows 샌드박스 설정 없이 격리된 임시 폴더에서 `-s danger-full-access`로 실행했다(`workspace-write`는 아래 제약 참고).
+`(2026-10)` 행은 당시 공개 카탈로그(24개) 기준이다. 2026-11-03 카탈로그(19개)에서 실제 추론으로 다시 확인한 모델은 `(2026-11)` 행에 적은 모델뿐이며, Windows에서는 이번 변경의 유료 검증을 하지 않았다.
 
-아니오. GitHub OAuth device flow로 최초 1회 로그인하면 장수명(`ghu_*`) 토큰이 `~/.config/litellm/github_copilot/access-token`에 저장되고, 이후 짧은 수명(~25분)의 Copilot 베어러 토큰은 `refresh-models.sh`/`start-proxy.sh`가 그 장수명 토큰으로 자동 재발급한다. 토큰을 GitHub에서 직접 revoke하거나 파일을 지우지 않는 한 재로그인 불필요.
+### 고급 기능 검증 범위 (2026-10-04)
 
-## 보안 설계
+아래는 **전체 24개 모델의 기능 보장표가 아니다**. 대표 경로만 검증했다:
+Claude Code = Claude Sonnet 5 / GPT-5.5, Codex = GPT-5.5 / Claude Sonnet 5.
+Windows Codex는 샌드박스 미설정으로 `danger-full-access`, WSL Codex는 `workspace-write`.
+클라이언트는 Codex 0.160.0, Claude Code Windows 2.1.283 / WSL 2.1.284.
 
-- 두 서비스(litellm :4000, copilot-api :4141) 모두 `127.0.0.1`에만 바인딩 — 외부 네트워크에서 접근 불가
-- litellm 마스터 키는 `.env`에 랜덤 생성되어 저장 (하드코딩 없음), git에 커밋되지 않음
-- GitHub 토큰은 프로세스 인자(`ps aux`로 노출)로 전달하지 않고 파일 스토어(`~/.local/share/copilot-api/github_token`, 600)로만 전달
-- 크레덴셜 파일/디렉터리 권한 600/700로 제한
-- `refresh-models.sh`는 fail-closed: Copilot API가 비정상 응답(모델 5개 미만)이면 기존 `config.yaml`을 덮어쓰지 않고 중단
+| 기능 | Claude Code (두 대표 모델) | Codex GPT-5.5 | Codex Claude Sonnet 5 |
+|---|---|---|---|
+| 세션 재개 후 임의 문자열 기억 | Windows/WSL 성공 | Windows/WSL 성공 | Windows/WSL 성공 |
+| 수동 압축 | Windows/WSL compact_boundary 확인 | Windows/WSL 압축 후 문자열 기억 성공 | Windows/WSL 압축 후 문자열 기억 성공 |
+| JSON 스키마 출력 | Windows/WSL 성공 | Windows/WSL 성공 | P7 적용 후 Windows/WSL 성공 |
+| 이미지 입력 (색상 순서 식별) | Windows/WSL 성공 | Windows/WSL 성공 | Windows/WSL 성공 |
+| 단일 서브에이전트 (실제 툴 호출 확인) | Windows/WSL 성공 | Windows/WSL 성공 | 실패: namespace 삭제 |
+| 로컬 stdio MCP (서버 호출·임의 반환값 확인) | Windows/WSL 성공 사례 있음 | Windows 성공, WSL은 툴 발견/승인 정책 실패로 성공 미확인 | Windows/WSL 실패: namespace 삭제 |
+| 프로젝트 지침 로딩 | Windows/WSL CLAUDE.md 성공 | Windows/WSL AGENTS.md 성공 | 별도 검증 안 함 |
+| Codex hosted 웹검색 (실제 검색 이벤트·출처 URL) | 해당 없음: 기존 Claude Code WebSearch 검증과 별개 | Windows/WSL 성공 | 별도 검증 안 함 |
+| 한 응답의 flat function 툴 2개 | 별도 검증 안 함 | Windows/WSL 성공 | Windows/WSL 성공 |
 
-## 알려진 이슈 대응 사례
+MCP는 모델의 툴 발견/선택 단계에서 실패 후 재시도 성공한 사례도 있어, 모든 서버·스키마의 안정성을 보장하지 않는다.
+WSL Codex MCP에서는 `approval policy is never`에 따른 실행 거부도 관찰했다. 이는 프록시 요청 실패와 구분해야 한다.
+JSON 결과가 스키마에 맞는다는 검증은 업스트림 constrained decoding의 모든 제약을 보장한다는 뜻이 아니다.
+수동 압축은 짧은 세션이며, 컨텍스트 한도까지 채운 자동 압축·반복 압축·장시간 세션은 미검증이다.
+Responses `reasoning.effort=low` 스트림은 두 대표 모델·두 OS에서 `response.completed`까지 성공했다.
+GPT-5.5는 reasoning 토큰을 보고했으나 Claude 경로는 0이었으므로, 요청 수락을 effort 의미의 동일성으로 해석하면 안 된다.
+추론 effort의 의미·캐싱 TTL·실제 최대 입력·병렬 MCP·취소·429 복구·VS Code 전체 기능도 별도 검증이 필요하다.
+현재 `ccp`는 권한 확인을 항상 건너뛰며, `ccx`의 별도 CODEX_HOME에는 평소 MCP/설정이 자동 복사되지 않는다.
 
-- **`claude-fable-5` 등 저장된 기본 모델과 충돌**: Claude Code `/model`로 저장한 기본 모델(예: Fable 5)이 `claude-copilot.sh` 실행 시 게이트웨이의 `ANTHROPIC_MODEL`을 덮어써서 존재하지 않는 Copilot 모델을 요청 → "unknown Copilot-Integration-Id" 에러. 대응: (1) 실제 Anthropic 모델명 → Copilot 모델 별칭을 `refresh-models.sh`에 추가, (2) `claude-copilot.sh`가 `--model`을 명시적으로 넘기지 않는 한 항상 `$ANTHROPIC_MODEL`을 강제 지정하도록 수정.
-- **Copilot이 dated Claude id를 retire**: 2026-09-07, `claude-opus-4.6`/`claude-sonnet-4.6`이 Copilot 카탈로그에서 사라짐 → `refresh-models.sh`에 리터럴로 박혀있던 호환 별칭(`claude-opus-4-5`/`claude-opus-4-1`/`claude-sonnet-4-5`/`claude-sonnet-4-6`)이 죽은 upstream id를 계속 가리켜 `model_not_supported` 400 발생. `refresh-models.sh` 재실행만으론 안 고쳐짐(동적 카탈로그 루프는 살아있는 id만 반영, 리터럴 별칭은 스크립트 소스를 직접 고쳐야 함). 대응: 별칭 타겟을 `claude-opus-5`/`claude-sonnet-5`로 갱신, 그리고 dated id 자체(`claude-opus-4.6` 등)도 호환 별칭으로 남겨 리다이렉트하도록 추가.
+## 개발 / 테스트
 
-## 크레덴셜
+```bash
+uv venv --python 3.13 .venv && uv pip install --python .venv -e .
+LITELLM_LOCAL_MODEL_COST_MAP=True .venv/bin/python -m unittest discover -s tests -v
+# Windows: $env:LITELLM_LOCAL_MODEL_COST_MAP="True"; .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
-- `~/.config/litellm/github_copilot/access-token` — 장수명 GitHub OAuth 토큰 (600)
-- `~/.config/litellm/github_copilot/api-key.json` — 단수명(~25분) Copilot 베어러, 자동 갱신 (600)
-- `~/litellm-copilot-gateway/.env` — litellm 마스터키 (600, 랜덤 생성)
-- copilot-api는 같은 GitHub 토큰을 재사용 (별도 인증 불필요)
+- 테스트는 오프라인이며 유료 추론·실제 토큰·실제 서비스를 쓰지 않는다. CI는 ubuntu/windows/macOS 매트릭스.
+- 운영 중인 게이트웨이와 충돌 없이 개발하려면 별도 데이터 디렉터리·포트를 쓴다:
+  `CCGW_HOME=/tmp/ccgw-dev CCGW_PORT=14000 CCGW_CODEX_PORT=14001 CCGW_CAPI_PORT=14141 ccgw start --all`
+- 설치된 copilot-api 번들까지 검사하려면 `CCGW_TEST_HOME=<data dir>`.
+- 유료 스모크(WebSearch, 스트리밍, 메인 모델)는 필요할 때만: `ccgw env claude`로 키를 얻어 `/v1/messages`에 직접 요청.
+
+## 보안
+
+- 모든 서비스 `127.0.0.1` 바인딩, LiteLLM 마스터키는 랜덤 생성되어 `<data>/.env`(600)에만 저장.
+- GitHub 토큰은 프로세스 인자로 넘기지 않고 파일 스토어(600)로만 전달.
+- 클라이언트 환경변수는 `ccp`/`ccx`의 자식 프로세스에만 적용.
