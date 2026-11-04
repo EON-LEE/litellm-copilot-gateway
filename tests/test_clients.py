@@ -148,6 +148,20 @@ class CodexLauncherTests(unittest.TestCase):
     def test_find_codex_honours_override(self):
         self.assertEqual(codex.find_codex({"CCX_CODEX": "/opt/codex"}), "/opt/codex")
 
+    def test_find_vscode_uses_the_macos_app_bundle_when_code_is_not_on_path(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = Path(tmp) / "Applications" / "Visual Studio Code.app" / "Contents" / "Resources" / "app" / "bin"
+            cli.mkdir(parents=True)
+            (cli / "code").write_bytes(b"")
+            with mock.patch.object(codex.shutil, "which", return_value=None), \
+                    mock.patch.object(codex.Path, "home", return_value=Path(tmp)):
+                with mock.patch.object(codex.sys, "platform", "darwin"):
+                    self.assertEqual(codex.find_vscode({}), str(cli / "code"))
+                    self.assertEqual(codex.find_vscode({"CCX_VSCODE": "/x/code"}), "/x/code")
+                with mock.patch.object(codex.sys, "platform", "linux"), mock.patch.object(codex.os, "name", "posix"):
+                    self.assertIsNone(codex.find_vscode({}))
+
     def test_winget_codex_without_alias(self):
         from unittest import mock
         with tempfile.TemporaryDirectory() as tmp:

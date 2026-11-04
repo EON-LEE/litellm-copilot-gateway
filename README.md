@@ -11,7 +11,7 @@ Windows 네이티브 · macOS · Linux · WSL 에서 **같은 명령**으로 동
 
 ## 설치
 
-사전 준비: [uv](https://docs.astral.sh/uv/), Node.js 20+(`node`, `npm`), Copilot 구독 GitHub 계정, 쓰려는 클라이언트(`claude` 및/또는 `codex` 또는 VS Code `openai.chatgpt` 확장).
+사전 준비: [uv](https://docs.astral.sh/uv/), Node.js 22.13+(`node`, `npm`; copilot-api 2.6.15 요구 버전), Copilot을 쓸 수 있는 GitHub 계정, 쓰려는 클라이언트(`claude` 및/또는 `codex` 또는 VS Code `openai.chatgpt` 확장).
 
 ```bash
 uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway
@@ -62,7 +62,7 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
   - 계정에 없는 계열은 설정하지 않는다. 그 슬롯을 고르면 오류가 나며, 다른 계열로 대체하지 않는다.
   - 직접 지정한 모델 변수가 카탈로그에 없으면 실행할 때 경고한다.
 - `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로다. 첫 실행 때 `config.toml`에 저장하는 기본 모델은 `CCX_MODEL`, 없으면 카탈로그의 `powerful` 등급 OpenAI Responses 모델 중 최신 버전이다. 저장된 모델이나 `-m` 모델이 카탈로그에 없으면 경고만 하고 바꾸지 않는다(`/model` 또는 `ccx -m`으로 변경). 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, Windows winget 패키지, 그다음 VS Code 확장 번들 `codex`).
-- `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요).
+- `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요). macOS에서 `code` 명령이 PATH에 없으면 `~/Applications`, `/Applications` 순서로 VS Code 앱을 찾는다.
 - 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
 
 ### 기존 bash 버전에서 이전
@@ -70,7 +70,7 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 예전 `~/litellm-copilot-gateway/*.sh`는 새 명령으로 넘겨주는 얇은 shim으로 남아 있어 기존 알리아스(`ccp=…/claude-copilot.sh`)도 동작한다. 새 설치 후에는 알리아스를 지우고 `ccp`/`ccx`/`ccgw`를 직접 쓰면 된다.
 
 - 마스터키: 레거시 `~/litellm-copilot-gateway/.env`의 키를 첫 실행 때 그대로 가져온다.
-- 로그인 토큰: 같은 위치(`~/.config/litellm/github_copilot`)를 재사용 → 재로그인 불필요.
+- 로그인 토큰: 같은 위치(`~/.config/litellm/github_copilot`)를 재사용 → 재로그인 불필요. copilot-api가 예전에 따로 저장한 `github_token`은 더 이상 쓰지 않는다(아래 "Copilot 계정" 참고).
 - 포트 4000에 bash 시절 LiteLLM이 떠 있으면 `ccgw restart claude`가 확인 후 교체한다.
 
 ## 아키텍처
@@ -104,8 +104,19 @@ Codex CLI/VS Code ─/v1/responses─▶ LiteLLM :4001 (Responses) ─┼─▶ 
 | macOS | `~/Library/Application Support/copilot-gateway` |
 | Linux/WSL | `${XDG_DATA_HOME:-~/.local/share}/copilot-gateway` |
 
-`.env`(마스터키), `config.yaml`(Claude용), `config-codex.yaml`(Codex용, 자동 생성 — 직접 편집 금지), `logs/`, `codex/`(CODEX_HOME), `copilot-api/`.
-GitHub 토큰: `~/.config/litellm/github_copilot/` (`GITHUB_COPILOT_TOKEN_DIR`로 변경).
+`.env`(마스터키), `config.yaml`(Claude용), `config-codex.yaml`(Codex용, 자동 생성 — 직접 편집 금지), `logs/`, `codex/`(CODEX_HOME), `copilot-api/`, `run/`(서비스별 로그인 지문).
+GitHub 로그인 토큰: `~/.config/litellm/github_copilot/` (아래 "Copilot 계정" 참고).
+
+## Copilot 계정
+
+게이트웨이는 GitHub 로그인 하나로 Copilot을 호출한다. 계정은 코드에 고정하지 않는다. 사용자가 로그인하거나 토큰 폴더를 지정해서 정한다.
+
+- **토큰 폴더**: 기본값은 `~/.config/litellm/github_copilot`이다. 다른 폴더를 쓰려면 `GITHUB_COPILOT_TOKEN_DIR`을 환경변수나 `<data>/.env`에 절대 경로로 지정한다. 둘 다 있으면 환경변수가 우선한다. 계정별로 폴더를 나누면 `.env`의 한 줄로 계정을 바꿀 수 있다.
+- **로그인**: `ccgw login`은 GitHub device 로그인을 한다. Copilot 사용 권한을 확인한 뒤에만 토큰을 저장하고, 계정 이름을 보여 준다. 이미 로그인돼 있으면 계정만 보여 준다. 다른 계정으로 바꾸려면 `ccgw login --force`를 실행하거나, 다른 토큰 폴더를 지정하고 `ccgw login`을 실행한다.
+- **모든 경로가 같은 로그인을 사용**: 모델 목록 갱신, LiteLLM `github_copilot` 경로, copilot-api가 같은 토큰을 쓴다. copilot-api에는 `COPILOT_API_GITHUB_TOKEN` 환경변수로 넘기므로, copilot-api가 예전에 저장한 `github_token` 파일은 쓰지 않는다(파일을 지우지는 않는다). `COPILOT_API_OAUTH_APP`·`COPILOT_API_ENTERPRISE_URL` 모드에서는 copilot-api 자체 로그인을 쓴다.
+- **로그인이 바뀌면 재시작**: 각 서비스를 시작할 때 사용한 로그인의 지문을 `<data>/run/`에 기록한다. 지문은 토큰 폴더와 토큰으로 만든 해시이며, 지문으로 토큰 값을 알아낼 수 없다. `ccp`·`ccx`·`ccgw start`는 지문이 다르거나 기록이 없는 실행 중 서비스를 재시작한다. `ccgw login --force`는 실행 중인 서비스를 바로 새 로그인으로 옮긴다.
+- **확인**: `ccgw doctor`가 로그인한 GitHub 계정과 Copilot 플랜(sku)을 보여 준다. 토큰 값은 출력·로그·명령 인자에 쓰지 않는다. POSIX에서는 토큰 파일을 600으로 저장하고, 시작할 때 권한이 넓으면 600으로 고친다.
+- **Git 자격 증명과 분리**: `GH_TOKEN`·`GITHUB_TOKEN`·gh 키링은 읽지 않는다. 저장소에 push하는 계정과 Copilot 계정이 달라도 된다.
 
 ## 모델 1:1 매핑
 
@@ -156,6 +167,8 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | 신규 모델 `gpt-6.1-terra`·`mai-code-2`: `ccp -p` Write 툴 루프, `ccx exec` 파일 생성+셸 실행 — WSL(Claude Code 2.1.284 · Codex 0.160.0) | ✅ (2026-11) |
 | 카탈로그 기본값: `ccp` 메인 `claude-sonnet-5.5` Write 루프, haiku 슬롯 `claude-haiku-5.5` 응답, `ccx` 기본 `gpt-6.1-sol` 파일+셸 — WSL | ✅ (2026-11) |
 | 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`)과 실행 중 copilot-api 재시작, 교정 후 실검색(JSON·스트림, copilot-api 사용 기록에서 `gpt-6-luna` 확인) — WSL | ✅ (2026-11) |
+| 로그인 통일: copilot-api가 예전에 저장한 잘못된 토큰 파일을 무시하고 게이트웨이 로그인으로 기동(모델 목록 수신), 같은 로그인은 재사용, `.env`로 토큰 폴더를 바꾸면 3개 서비스 재시작, 토큰 권한 644 → 600 교정, `ccgw login`·`doctor`의 계정 표시 — WSL 격리 기동 | ✅ (2026-11, 추론 요청 없음) |
+| macOS: Node 요구 버전 확인, VS Code 앱 경로 탐색 | CI(macos-latest) 단위 테스트만. 실제 Mac 실행은 미검증 |
 | `ccx code` VS Code 확장 대화 — Windows | ✅ |
 | Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
 | web_fetch 서버 툴 | ❌ (위 제약) |
@@ -208,5 +221,5 @@ LITELLM_LOCAL_MODEL_COST_MAP=True .venv/bin/python -m unittest discover -s tests
 ## 보안
 
 - 모든 서비스 `127.0.0.1` 바인딩, LiteLLM 마스터키는 랜덤 생성되어 `<data>/.env`(600)에만 저장.
-- GitHub 토큰은 프로세스 인자로 넘기지 않고 파일 스토어(600)로만 전달.
+- GitHub 토큰은 명령 인자로 넘기지 않는다. copilot-api에는 자식 프로세스 환경변수로만 전달하고, 토큰 파일은 POSIX에서 600으로 유지한다.
 - 클라이언트 환경변수는 `ccp`/`ccx`의 자식 프로세스에만 적용.

@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 
-from . import catalog, copilot_api, services
+from . import auth, catalog, copilot_api, services
 from .settings import Settings, write_private
 
 TARGETS = ("claude", "codex")
@@ -34,10 +34,16 @@ def is_help(argv) -> bool:
 def build_services(settings: Settings, key: str | None = None) -> dict:
     key = key or settings.master_key()
     litellm_env = {"LITELLM_MASTER_KEY": key, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
-                   "GITHUB_COPILOT_TOKEN_DIR": str(settings.token_dir)}
+                   "GITHUB_COPILOT_TOKEN_DIR": str(settings.token_dir),
+                   # Same files as the catalog and copilot-api, even if the user's shell overrides them.
+                   "GITHUB_COPILOT_ACCESS_TOKEN_FILE": auth.TOKEN_FILE,
+                   "GITHUB_COPILOT_API_KEY_FILE": auth.API_KEY_FILE}
 
     def capi_command():
-        return copilot_api.prepare(settings.home, settings.token_dir, settings.capi_port)
+        return copilot_api.prepare(settings.home, settings.capi_port)
+
+    def capi_secret_env():
+        return copilot_api.token_env(auth.read_token(settings.token_dir))
 
     def litellm_command(config, port):
         return lambda: [sys.executable, "-m", "copilot_gateway.litellm_runner",
@@ -45,7 +51,7 @@ def build_services(settings: Settings, key: str | None = None) -> dict:
 
     return {
         "capi": services.Service("capi", settings.capi_port, settings.logs / "copilot-api.log", "capi",
-                                 command=capi_command, env={"HOST": "127.0.0.1"}),
+                                 command=capi_command, env={"HOST": "127.0.0.1"}, secret_env=capi_secret_env),
         "claude": services.Service("claude", settings.claude_port, settings.logs / "litellm-claude.log",
                                    "litellm", config=settings.claude_config,
                                    command=litellm_command(settings.claude_config, settings.claude_port),
@@ -109,17 +115,40 @@ def sync_web_search(settings, log=eprint, environ=None) -> bool:
     return True
 
 
-def start_capi(settings, table, log=eprint):
-    capi = table["capi"]
-    # copilot-api reads its config once, so a running instance must restart to pick up the change.
-    if sync_web_search(settings, log) and services.inspect(capi).status == "running":
-        services.stop(capi, log=log)
-    services.start(capi, log=log)
+def credential_file(settings, name):
+    return settings.run / f"{name}.credential"
+
+
+def _started_with(settings, name):
+    try:
+        return credential_file(settings, name).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def run_service(settings, service, credential, restart=False, log=eprint) -> None:
+    """Start a service; restart it if it runs an old config or a login other than `credential`.
+
+    A running service with no recorded login (an older ccgw, or another
+    tool) is restarted too, because its account cannot be confirmed.
+    """
+    status = services.inspect(service).status
+    if status == "legacy" or (status == "running" and (restart or _started_with(settings, service.name) != credential)):
+        services.stop(service, log=log)
+    if services.start(service, log=log):
+        write_private(credential_file(settings, service.name), credential + "\n")
+
+
+def start_capi(settings, table, credential, log=eprint):
+    # copilot-api reads its config once, so a WebSearch model change needs a restart.
+    run_service(settings, table["capi"], credential, restart=sync_web_search(settings, log), log=log)
 
 
 def ensure(settings: Settings, targets, do_refresh=True, log=eprint) -> dict:
-    """Make sure copilot-api and the requested LiteLLM instances run current configs."""
+    """Make sure copilot-api and the requested LiteLLM instances run current configs and the current login."""
     key = settings.master_key()
+    credential = auth.fingerprint(settings.token_dir)
+    auth.secure(settings.token_dir)
     copilot_api.ensure_installed(settings.home, log=log)
     changed = {target: False for target in TARGETS}
     if do_refresh:
@@ -137,15 +166,21 @@ def ensure(settings: Settings, targets, do_refresh=True, log=eprint) -> dict:
         if not config_for(settings, target).exists():
             raise services.ServiceError(f"no {config_for(settings, target)}; run `ccgw refresh`")
     table = build_services(settings, key)
-    start_capi(settings, table, log=log)
+    start_capi(settings, table, credential, log=log)
     for target in targets:
         service = table[target]
-        status = services.inspect(service).status
-        if status == "legacy" or (status == "running" and changed[target]):
-            services.stop(service, log=log)
-        services.start(service, log=log)
+        run_service(settings, service, credential, restart=changed[target], log=log)
         log(f"{target:<8}: {services.check_ready(service)} models exposed")
     return table
+
+
+def apply_login(settings, log=eprint) -> list:
+    """After a new login, move whatever is running onto it (the credential check restarts them)."""
+    table = build_services(settings)
+    running = [name for name in ("capi", *TARGETS) if services.inspect(table[name]).status == "running"]
+    if running:
+        ensure(settings, [name for name in running if name != "capi"], do_refresh=False, log=log)
+    return running
 
 
 def child_env(base=None, **extra):

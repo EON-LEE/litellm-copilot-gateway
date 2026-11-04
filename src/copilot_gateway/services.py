@@ -44,6 +44,8 @@ class Service:
     config: Path | None = None
     command: Callable[[], list] | None = None
     env: dict = field(default_factory=dict)
+    # Read only when the process is spawned (credentials), so status/stop never need them.
+    secret_env: Callable[[], dict] | None = None
     auth: str | None = None
     # First launch after install can be slow (Windows Defender scans new node_modules / site-packages).
     startup_timeout: float = 180
@@ -180,7 +182,7 @@ def stop(service, log=print, timeout=20) -> bool:
 def _spawn(service):
     service.log.parent.mkdir(parents=True, exist_ok=True)
     command = service.command()
-    env = {**os.environ, **service.env}
+    env = {**os.environ, **service.env, **(service.secret_env() if service.secret_env else {})}
     with open(service.log, "ab") as log:
         kwargs = dict(stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env,
                       cwd=str(service.log.parent))
