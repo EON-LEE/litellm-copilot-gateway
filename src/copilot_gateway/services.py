@@ -47,8 +47,9 @@ class Service:
     # Read only when the process is spawned (credentials), so status/stop never need them.
     secret_env: Callable[[], dict] | None = None
     auth: str | None = None
-    # First launch after install can be slow (Windows Defender scans new node_modules / site-packages).
-    startup_timeout: float = 180
+    # First launch after install can be slow (Windows Defender scans new node_modules / site-packages);
+    # a fresh Windows install was measured at over 3 minutes for one LiteLLM instance.
+    startup_timeout: float = 300
 
     def classify(self, cmdline) -> str | None:
         """'ours' when the command line is this gateway service, 'legacy' for the bash-era one."""
