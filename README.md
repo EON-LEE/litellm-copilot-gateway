@@ -31,10 +31,19 @@ $env:CCGW_COPILOT_API_SOURCE = "C:\path\jeffreycao-copilot-api-2.6.15.tgz"
 ccgw setup
 ```
 
-Codex CLI는 npm 없이도 설치할 수 있다 (`ccx`가 자동으로 찾음):
+사내 보안 정책이 PyPI 다운로드를 막으면(예: Defender Network Protection이 `uv.exe`의 `files.pythonhosted.org` 연결 차단), 조직이 제공하는 PyPI 미러를 지정해 설치한다. 보안 설정을 끄거나 우회하지 않는다.
 
 ```powershell
-winget install OpenAI.Codex      # Windows (symlink 정책으로 `codex` 별칭이 안 생겨도 ccx가 패키지 폴더에서 찾음)
+uv tool install --python 3.13 --default-index "<조직의 PyPI simple 인덱스 URL>" git+https://github.com/EON-LEE/litellm-copilot-gateway
+```
+
+설치 후 `uv`가 안내하면 `uv tool update-shell`로 `ccgw`·`ccp`·`ccx` 폴더를 PATH에 추가하고 새 셸을 연다.
+
+Codex CLI와 Claude Code는 npm 없이도 설치할 수 있다 (`ccx`·`ccp`가 자동으로 찾음):
+
+```powershell
+winget install OpenAI.Codex          # Windows (symlink 정책으로 `codex` 별칭이 안 생겨도 ccx가 패키지 폴더에서 찾음)
+winget install Anthropic.ClaudeCode  # Windows (패키지 폴더를 PATH에 추가하므로 새 셸에서 `claude` 사용)
 # 또는 https://github.com/openai/codex/releases 의 codex-<arch>-pc-windows-msvc.exe / -unknown-linux-musl 바이너리를 PATH에 두거나 CCX_CODEX로 지정
 ```
 ```bash
@@ -152,6 +161,8 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
 - **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상, 2026-10 관찰). `ccgw start`가 copilot-api 설정에서 관리하는 키는 `useResponsesApiWebSocket`(`false` 고정)과 `messageApiWebSearchModel`(위 WebSearch 참고) 두 개뿐이다. 업스트림 기본값 표현이 바뀌면 시작을 거부한다.
 - **Codex Windows 샌드박스**: Codex의 Windows 네이티브 샌드박스를 설정하지 않으면(VS Code의 "Finish Windows setup" 등, OS 설정 변경) `-s workspace-write`도 쓰기·명령 실행이 거부된다. 게이트웨이와 무관한 Codex 동작이며, 설정을 마치거나 신뢰하는 폴더에서 `-s danger-full-access`를 쓴다. WSL/Linux/macOS는 해당 없음.
+- **Windows 첫 시작이 느림**: 새로 설치한 환경에서는 Defender가 파일을 검사하므로 LiteLLM 인스턴스 하나가 시작하는 데 몇 분이 걸릴 수 있다. 2026-11 측정에서 첫 실행은 3분을 넘었고, 다음 실행은 인스턴스당 약 80초였다. 시작 대기 시간은 5분이다.
+- **copilot-api 첫 시작의 models.dev 조회**: copilot-api 2.6.15는 캐시가 없으면 시작할 때 `https://models.dev/api.json`을 15초 안에 받아야 하고, 실패하면 종료한다. 첫 시작이 이 오류로 실패하면 다시 실행한다. 한 번 받은 뒤에는 캐시로 시작한다.
 - **Claude Code `[claude-code:unrecognized_model]` 경고**: WebSearch 보조 모델(`gpt-6-luna` 등 Claude 외 이름)에 대해 출력되는 Claude Code 측 정보성 경고. 요청은 정상 처리된다.
 - **ToS**: 에디터 외부의 Copilot API 사용은 비공식 영역. 개인·로컬·수동 규모로만 사용 권장.
 
@@ -169,6 +180,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`)과 실행 중 copilot-api 재시작, 교정 후 실검색(JSON·스트림, copilot-api 사용 기록에서 `gpt-6-luna` 확인) — WSL | ✅ (2026-11) |
 | 로그인 통일: copilot-api가 예전에 저장한 잘못된 토큰 파일을 무시하고 게이트웨이 로그인으로 기동(모델 목록 수신), 같은 로그인은 재사용, `.env`로 토큰 폴더를 바꾸면 3개 서비스 재시작, 토큰 권한 644 → 600 교정, `ccgw login`·`doctor`의 계정 표시 — WSL 격리 기동 | ✅ (2026-11, 추론 요청 없음) |
 | macOS: Node 요구 버전 확인, VS Code 앱 경로 탐색 | CI(macos-latest) 단위 테스트만. 실제 Mac 실행은 미검증 |
+| 실사용 설치(2026-11-04): WSL — 기존 `ccp` alias가 shim을 거쳐 새 패키지 실행, 기존 copilot-api 설정의 WebSearch 모델 교정. Windows — 조직 PyPI·npm 미러로 설치, `ccgw login` device 로그인 승인과 계정 표시. 두 환경 모두 `ccp` 응답·WebSearch 실검색·`ccx` 응답 | ✅ |
 | `ccx code` VS Code 확장 대화 — Windows | ✅ |
 | Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
 | web_fetch 서버 툴 | ❌ (위 제약) |
