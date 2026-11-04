@@ -2,8 +2,9 @@
 
 Everything the gateway writes lives in one per-user data directory, so the
 same code behaves identically on Windows, macOS, Linux, and WSL. Override it
-with CCGW_HOME. Values in ``<data>/.env`` act as defaults for the CCGW_* and
-LITELLM_MASTER_KEY settings; the process environment wins for CCGW_* values.
+with CCGW_HOME. Values in ``<data>/.env`` act as defaults for the CCGW_*,
+GITHUB_COPILOT_TOKEN_DIR and LITELLM_MASTER_KEY settings; the process
+environment wins for CCGW_* values and GITHUB_COPILOT_TOKEN_DIR.
 """
 from __future__ import annotations
 
@@ -88,8 +89,11 @@ class Settings:
                 raise SystemExit(f"ERROR: {name} must be a TCP port number")
             return value
 
-        token_dir = Path(environ.get("GITHUB_COPILOT_TOKEN_DIR")
-                         or Path.home() / ".config" / "litellm" / "github_copilot").expanduser()
+        raw_token_dir = environ.get("GITHUB_COPILOT_TOKEN_DIR") or file_values.get("GITHUB_COPILOT_TOKEN_DIR")
+        token_dir = (Path(raw_token_dir).expanduser() if raw_token_dir
+                     else Path.home() / ".config" / "litellm" / "github_copilot")
+        if not token_dir.is_absolute():
+            raise SystemExit("ERROR: GITHUB_COPILOT_TOKEN_DIR must be an absolute path")
         settings = cls(home, port("CCGW_PORT"), port("CCGW_CODEX_PORT"), port("CCGW_CAPI_PORT"),
                        token_dir, file_values)
         ports = (settings.claude_port, settings.codex_port, settings.capi_port)

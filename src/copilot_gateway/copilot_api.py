@@ -2,7 +2,8 @@
 
 copilot-api is installed with npm into a private, version-pinned prefix under
 the data dir (no npx cache lookup, no PATH ambiguity). Its bundled server is
-patched so a named Claude model is never swapped for Copilot's "small model".
+patched so a named Claude model is never swapped for Copilot's "small model",
+and it receives the gateway's login through its environment (``token_env``).
 """
 from __future__ import annotations
 
@@ -17,6 +18,10 @@ import tempfile
 
 PACKAGE = "@jeffreycao/copilot-api"
 EXPECTED_VERSION = "2.6.15"
+# engines.node of the pinned package (checked against the installed package.json in tests).
+NODE_MINIMUM = (22, 13, 0)
+NODE_LABEL = "22.13"
+TOKEN_ENV = "COPILOT_API_GITHUB_TOKEN"
 MARKER = "// PATCHED (local): preserve explicitly requested Copilot model"
 LEGACY_BRANCH = '''\tif (!state.tokenBasedBilling && !shouldUseClaudeAutoModel) {
 \t\tconst tools = anthropicPayload.tools;
@@ -161,10 +166,25 @@ def verify_package(package):
     return entry, server, config
 
 
+def node_version(node):
+    """(major, minor, patch) from `node --version`, or None when it cannot be read."""
+    try:
+        result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", result.stdout.strip())
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
 def node_executable():
     node = shutil.which("node")
     if not node:
-        raise CopilotApiError("Node.js (node) is required on PATH for copilot-api")
+        raise CopilotApiError(f"Node.js {NODE_LABEL} or newer is required on PATH for copilot-api")
+    version = node_version(node)
+    if version is None or version < NODE_MINIMUM:
+        found = "v" + ".".join(map(str, version)) if version else "an unreadable version"
+        raise CopilotApiError(f"copilot-api {EXPECTED_VERSION} needs Node.js {NODE_LABEL} or newer; "
+                              f"{node} is {found}")
     return node
 
 
@@ -178,7 +198,7 @@ def ensure_installed(home, environ=None, log=print):
         pass
     npm = shutil.which("npm")
     if not npm:
-        raise CopilotApiError("npm is required to install copilot-api (install Node.js 20+)")
+        raise CopilotApiError(f"npm is required to install copilot-api (install Node.js {NODE_LABEL} or newer)")
     root = install_root(home)
     root.mkdir(parents=True, exist_ok=True)
     source = environ.get("CCGW_COPILOT_API_SOURCE") or f"{PACKAGE}@{EXPECTED_VERSION}"
@@ -199,21 +219,27 @@ def ensure_installed(home, environ=None, log=print):
     return package
 
 
-def seed_token(config_source, token_dir, environ=None):
-    """Seed copilot-api's token store from LiteLLM's OAuth token (never via argv)."""
+def token_env(token, environ=None):
+    """Hand copilot-api the gateway's login; it reads this variable before its own github_token file.
+
+    Without this, a token that copilot-api stored earlier (possibly another
+    account) would serve inference while the catalog used the gateway login.
+    The OAuth-app and GitHub Enterprise modes keep copilot-api's own login.
+    """
     environ = os.environ if environ is None else environ
     if environ.get("COPILOT_API_OAUTH_APP") or environ.get("COPILOT_API_ENTERPRISE_URL"):
-        return
-    target = app_dir(config_source, environ) / "github_token"
-    if target.exists() and target.stat().st_size > 0:
-        return
-    source = Path(token_dir) / "access-token"
-    try:
-        token = source.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        raise CopilotApiError(f"no GitHub Copilot login at {token_dir}; run `ccgw login`") from None
-    from .settings import write_private
-    write_private(target, token)
+        return {}
+    return {TOKEN_ENV: token}
+
+
+def check_token_env(package):
+    """Fail closed unless the installed bundle prefers TOKEN_ENV over its own token file."""
+    source = "\n".join(path.read_text(encoding="utf-8") for path in sorted((Path(package) / "dist").glob("*.js")))
+    resolver = re.findall(r"async function resolveGitHubToken\(cliToken\) \{(.*?)\n\}", source, re.DOTALL)
+    body = resolver[0] if len(resolver) == 1 else ""
+    env_read, file_read = body.find("readGitHubTokenFromEnv()"), body.find("await readGitHubToken()")
+    if source.count(f'process.env["{TOKEN_ENV}"]') != 1 or not 0 <= env_read < file_read:
+        raise CopilotApiError(f"unexpected {TOKEN_ENV} handling; upstream may have changed")
 
 
 TRANSPORT_KEY = "useResponsesApiWebSocket"
@@ -313,14 +339,15 @@ def sync_installed_web_search(home, available, override=None, environ=None):
     return sync_web_search_model(config_path(config, environ), config, available, override)
 
 
-def prepare(home, token_dir, port, environ=None):
-    """Validate + patch the install and return the launch command."""
-    entry, server, config = verify_package(package_dir(home))
+def prepare(home, port, environ=None):
+    """Validate + patch the install and return the launch command (the token goes via token_env)."""
+    package = package_dir(home)
+    entry, server, config = verify_package(package)
     path = config_path(config, environ)
     check_identity_options(path)
     enforce_http_transport(path, config)
+    check_token_env(package)
     patch_identity(server)
-    seed_token(config, token_dir, environ)
     return [node_executable(), str(entry), "start", "--port", str(port)]
 
 

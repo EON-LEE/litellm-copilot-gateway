@@ -159,6 +159,12 @@ def find_vscode(environ=None):
     found = shutil.which("code")
     if found:
         return found
+    if sys.platform == "darwin":
+        # The app bundle's CLI, for when "Install 'code' command in PATH" was never run.
+        for base in (Path.home() / "Applications", Path("/Applications")):
+            candidate = base / "Visual Studio Code.app" / "Contents" / "Resources" / "app" / "bin" / "code"
+            if candidate.exists():
+                return str(candidate)
     if os.name == "nt":
         for base in (environ.get("LOCALAPPDATA"), environ.get("ProgramFiles")):
             if base:

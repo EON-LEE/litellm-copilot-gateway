@@ -4,11 +4,10 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import subprocess
 import sys
 import time
 
-from . import __version__, catalog, copilot_api, gateway, litellm_patches, services
+from . import __version__, auth, catalog, copilot_api, gateway, litellm_patches, services
 from .settings import Settings
 
 SERVICES = ("capi", "claude", "codex")
@@ -30,12 +29,39 @@ def cmd_paths(settings, args):
     return 0
 
 
+def account_label(token):
+    """GitHub login (and Copilot plan when readable) for display; never the token."""
+    try:
+        name = auth.github_login(token)
+    except auth.AuthError as error:
+        return f"an unverified account ({error})"
+    try:
+        sku = auth.copilot_key(token).get("sku")
+    except auth.AuthError as error:
+        return f"{name} — {error}"
+    return f"{name} ({sku})" if sku else name
+
+
 def cmd_login(settings, args):
-    litellm_patches.install()
-    os.environ["GITHUB_COPILOT_TOKEN_DIR"] = str(settings.token_dir)
-    from litellm.llms.github_copilot.authenticator import Authenticator
-    Authenticator().get_api_key()
-    print(f"GitHub Copilot login stored in {settings.token_dir}")
+    try:
+        current = auth.read_token(settings.token_dir)
+    except auth.AuthError:
+        current = None
+    if current and not args.force:
+        print(f"Already logged in at {settings.token_dir}: {account_label(current)}")
+        print("To use another GitHub account, run `ccgw login --force`, or set GITHUB_COPILOT_TOKEN_DIR "
+              "(environment or <data>/.env) to another directory and run `ccgw login`.")
+        return 0
+    name = auth.login(settings.token_dir, prompt=lambda text: print(text, flush=True))
+    print(f"GitHub Copilot login for {name} stored in {settings.token_dir}")
+    if current:
+        # The new account may offer other models; running services must not keep the old login.
+        try:
+            gateway.refresh(settings)
+        except catalog.CatalogError as error:
+            print(f"⚠️  Model refresh failed ({error}); run `ccgw refresh`")
+        if gateway.apply_login(settings, log=print):
+            print("Running gateway services now use the new login.")
     return 0
 
 
@@ -172,14 +198,27 @@ def cmd_doctor(settings, args):
         report("litellm patches", True, ", ".join(litellm_patches.verify()))
     except Exception as error:  # noqa: BLE001 - doctor must report every failure
         report("litellm patches", False, str(error))
-    report("node", shutil.which("node"), shutil.which("node") or "missing (Node.js 20+ required)")
+    node = shutil.which("node")
+    version = copilot_api.node_version(node) if node else None
+    found = ("v" + ".".join(map(str, version)) + f" at {node}") if version else (node or "missing")
+    report("node", version is not None and version >= copilot_api.NODE_MINIMUM,
+           f"{found} (copilot-api {copilot_api.EXPECTED_VERSION} needs {copilot_api.NODE_LABEL}+)")
     try:
         copilot_api.verify_package(copilot_api.package_dir(settings.home))
         report("copilot-api", True, f"{copilot_api.EXPECTED_VERSION} at {copilot_api.install_root(settings.home)}")
     except copilot_api.CopilotApiError as error:
         report("copilot-api", False, f"{error} (run `ccgw setup`)")
-    token = settings.token_dir / "access-token"
-    report("github login", token.exists() and token.stat().st_size > 0, str(token))
+    try:
+        token = auth.read_token(settings.token_dir)
+        label = account_label(token)
+        report("copilot account", not label.startswith("an unverified") and " — " not in label,
+               f"{label} via {settings.token_dir}")
+    except auth.AuthError as error:
+        report("copilot account", False, str(error))
+    token_file = settings.token_dir / auth.TOKEN_FILE
+    if os.name == "posix" and token_file.exists():
+        mode = token_file.stat().st_mode & 0o777
+        report("token permissions", not mode & 0o077, f"{mode:o} {token_file} (fixed to 600 on start)")
     report("master key", bool(settings.file_values.get("LITELLM_MASTER_KEY")), str(settings.env_file))
     report("claude config", settings.claude_config.exists(), str(settings.claude_config))
     report("codex config", settings.codex_config.exists(), str(settings.codex_config))
@@ -199,12 +238,11 @@ def cmd_setup(settings, args):
     litellm_patches.install()
     litellm_patches.verify()
     print("litellm        patches verified")
-    token = settings.token_dir / "access-token"
-    if not (token.exists() and token.stat().st_size > 0):
-        # Device login runs in a child so this process keeps unpatched imports out of sys.modules.
-        result = subprocess.call([sys.executable, "-m", "copilot_gateway.cli", "login"])
-        if result:
-            return result
+    try:
+        auth.read_token(settings.token_dir)
+    except auth.AuthError:
+        name = auth.login(settings.token_dir, prompt=lambda text: print(text, flush=True))
+        print(f"login          {name} ({settings.token_dir})")
     return cmd_refresh(settings, args)
 
 
@@ -213,7 +251,9 @@ def build_parser():
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup", help="create key, install copilot-api, log in, generate configs").set_defaults(func=cmd_setup)
-    sub.add_parser("login", help="GitHub device login for Copilot").set_defaults(func=cmd_login)
+    login = sub.add_parser("login", help="GitHub device login for the Copilot account the gateway uses")
+    login.add_argument("--force", action="store_true", help="replace an existing login (e.g. another account)")
+    login.set_defaults(func=cmd_login)
     sub.add_parser("refresh", help="regenerate configs from the live Copilot catalog").set_defaults(func=cmd_refresh)
     sub.add_parser("models", help="list Copilot models and token limits").set_defaults(func=cmd_models)
     for name, func, help_text in (("start", cmd_start, "start services (default: capi + claude)"),
@@ -248,7 +288,7 @@ def main(argv=None):
     try:
         return args.func(settings, args)
     except (services.ServiceError, catalog.CatalogError, copilot_api.CopilotApiError,
-            litellm_patches.PatchError) as error:
+            litellm_patches.PatchError, auth.AuthError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

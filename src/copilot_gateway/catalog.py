@@ -19,6 +19,8 @@ import re
 import urllib.error
 import urllib.request
 
+from . import auth
+
 HEADERS = {"editor-version": "vscode/1.100.0", "Copilot-Integration-Id": "vscode-chat"}
 TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
 MODELS_URL = "https://api.githubcopilot.com/models"
@@ -290,11 +292,9 @@ def _get_json(url, headers, timeout=20):
 def fetch_catalog(token_dir):
     """Mint a short-lived bearer and fetch the live catalog (credentials never logged)."""
     try:
-        github_token = (token_dir / "access-token").read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        raise CatalogError(f"no GitHub Copilot login at {token_dir}; run `ccgw login`") from None
-    if not github_token:
-        raise CatalogError(f"empty GitHub Copilot token at {token_dir}; run `ccgw login`")
+        github_token = auth.read_token(token_dir)
+    except auth.AuthError as error:
+        raise CatalogError(str(error)) from None
     bearer = _get_json(TOKEN_URL, {"Authorization": f"token {github_token}",
                                    "editor-version": HEADERS["editor-version"]}).get("token")
     if not isinstance(bearer, str) or not bearer:

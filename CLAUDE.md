@@ -12,6 +12,7 @@ GitHub Copilot 구독 모델을 Claude Code(`ccp`)와 Codex(`ccx`)에서 쓰는 
 - **copilot-api는 검증된 2.6.15 고정** (`copilot_api.EXPECTED_VERSION`). 전용 prefix 설치만 쓰고 `npx`/`@latest`/전역 설치를 쓰지 말 것. 버전 변경 시 실제 번들의 identity 패치 앵커를 함께 검증. `useResponsesApiWebSocket=false` 고정(`enforce_http_transport`)을 끄지 말 것 — WebSocket 전송은 gpt-5-mini 스트리밍을 깨뜨린다.
 - **WebSearch 보조 모델 동기화(`copilot_api.sync_web_search_model`)를 끄지 말 것** — copilot-api가 설정 파일에 저장한 종료 모델(예: `gpt-5-mini`)이 남으면 Claude Code WebSearch가 모두 실패한다.
 - **기본 모델을 코드에 고정하지 말 것** — `ccp` 슬롯은 `catalog.claude_families`, `ccx` 기본값은 `catalog.codex_default`가 실시간 카탈로그에서 고른다. 계정에 없는 계열을 다른 계열 모델로 채우지 말 것.
+- **Copilot 인증은 `auth.py` 한 곳에서만** — 카탈로그·LiteLLM·copilot-api가 같은 토큰 폴더의 토큰을 쓴다. copilot-api에는 `copilot_api.token_env`(환경변수)로만 넘기고, 서비스별 로그인 지문 확인(`gateway.run_service`)을 끄지 말 것. 계정 이름을 코드에 넣거나, `GH_TOKEN`·gh 키링 같은 Git 자격 증명을 Copilot 인증에 쓰지 말 것. 토큰 값을 출력·로그·명령 인자에 넣지 말 것.
 - **프로세스는 검증된 PID만 종료** — `services.stop`은 포트 소유 PID의 명령줄을 확인한다. 이름 기반 kill(`pkill`, `taskkill /IM`)이나 강제 종료로 우회하지 말 것.
 - `.env`(마스터키)와 크레덴셜은 절대 커밋 금지.
 
