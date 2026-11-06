@@ -32,6 +32,16 @@ class ClaudeLauncherTests(unittest.TestCase):
         self.assertEqual(claude.claude_args(["--", "--model", "x"], "claude-sonnet-5"),
                          ["--dangerously-skip-permissions", "--model", "claude-sonnet-5", "--", "--model", "x"])
 
+    def test_caller_can_control_permissions_without_losing_model_or_arguments(self):
+        argv = ["--permission-mode", "default", "--output-format", "stream-json"]
+        self.assertEqual(claude.claude_args(argv, "claude-sonnet-5", skip_permissions=False),
+                         ["--model", "claude-sonnet-5", *argv])
+        for argv in (["--model", "claude-opus-5"], ["--dangerously-skip-permissions", "--model=x"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(claude.claude_args(argv, "claude-sonnet-5", skip_permissions=False), argv)
+        self.assertEqual(claude.claude_args(["--", "--model", "x"], "claude-sonnet-5", skip_permissions=False),
+                         ["--model", "claude-sonnet-5", "--", "--model", "x"])
+
     def test_env_points_at_gateway_and_keeps_user_overrides(self):
         env = claude.claude_env(self.settings, "k", base={"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-gpt-6-astra",
                                                          "ANTHROPIC_BASE_URL": "https://api.anthropic.com"})
@@ -189,6 +199,34 @@ class HelpTests(unittest.TestCase):
                 with self.subTest(argv=argv):
                     self.assertEqual(codex.main(argv), 0)
                     self.assertEqual(claude.main(argv), 0)
+            for argv in (["--respect-permissions", "--help"], ["--no-refresh", "--respect-permissions", "--version"],
+                         ["--respect-permissions", "--no-refresh", "--help"]):
+                with self.subTest(argv=argv):
+                    self.assertEqual(claude.main(argv), 0)
+
+    def test_claude_launcher_options_are_consumed_in_either_order(self):
+        from unittest import mock
+        home = TempHome()
+        self.addCleanup(home.cleanup)
+        settings = home.settings()
+        gateway.refresh(settings, catalog())
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(gateway, "ensure") as ensure, \
+                mock.patch("copilot_gateway.settings.Settings.load", return_value=settings), \
+                mock.patch.object(settings.__class__, "master_key", return_value="key"), \
+                mock.patch("shutil.which", return_value="/test/claude"), \
+                mock.patch.object(claude, "run", return_value=0) as run:
+            for options in (["--no-refresh", "--respect-permissions"],
+                            ["--respect-permissions", "--no-refresh"]):
+                with self.subTest(options=options):
+                    self.assertEqual(claude.main([*options, "--permission-mode", "default"]), 0)
+                    ensure.assert_called_with(settings, ["claude"], do_refresh=False)
+                    self.assertEqual(run.call_args.args[0],
+                                     ["/test/claude", "--model", "claude-sonnet-5",
+                                      "--permission-mode", "default"])
+            self.assertEqual(claude.main(["--no-refresh", "--model", "claude-opus-5"]), 0)
+            self.assertEqual(run.call_args.args[0],
+                             ["/test/claude", "--dangerously-skip-permissions", "--model", "claude-opus-5"])
 
     def test_missing_executable_is_reported_not_raised(self):
         self.assertEqual(claude.run(["definitely-not-a-real-binary-ccgw"], {}), 127)

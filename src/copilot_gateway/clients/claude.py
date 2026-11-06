@@ -6,6 +6,7 @@ set only for this child process.
     ccp                       # default: the newest Sonnet your Copilot account offers
     ccp --model claude-gpt-6.1-sol
     ccp --no-refresh ...      # skip the catalog refresh (faster start)
+    ccp --respect-permissions ...  # let the caller control Claude's permissions
 """
 from __future__ import annotations
 
@@ -66,14 +67,15 @@ def describe(env):
     return f"Models: {env['ANTHROPIC_MODEL']} · " + " · ".join(slots)
 
 
-def claude_args(argv, model):
+def claude_args(argv, model, *, skip_permissions=True):
     """Force the gateway default unless the caller chose --model (a saved /model may not exist here)."""
+    prefix = ["--dangerously-skip-permissions"] if skip_permissions else []
     for arg in argv:
         if arg == "--":
             break
         if arg == "--model" or arg.startswith("--model="):
-            return ["--dangerously-skip-permissions", *argv]
-    return ["--dangerously-skip-permissions", "--model", model, *argv]
+            return [*prefix, *argv]
+    return [*prefix, "--model", model, *argv]
 
 
 def run(command, env):
@@ -92,13 +94,17 @@ def run(command, env):
 def main(argv=None):
     gateway.safe_console()
     argv = list(sys.argv[1:] if argv is None else argv)
+    do_refresh, skip_permissions = True, True
+    while argv and argv[0] in ("--no-refresh", "--respect-permissions"):
+        option = argv.pop(0)
+        if option == "--no-refresh":
+            do_refresh = False
+        else:
+            skip_permissions = False
     if gateway.is_help(argv):
         gateway.eprint(__doc__)
         executable = os.environ.get("CCP_CLAUDE") or shutil.which("claude")
         return run([executable, *argv], dict(os.environ)) if executable else 0
-    do_refresh = True
-    if argv[:1] == ["--no-refresh"]:
-        do_refresh, argv = False, argv[1:]
     settings = Settings.load()
     try:
         gateway.ensure(settings, ["claude"], do_refresh=do_refresh)
@@ -115,7 +121,8 @@ def main(argv=None):
     for name, value in unavailable_models(env, config):
         gateway.eprint(f"⚠️  {name}={value} is not offered by this Copilot account; requests for it will fail "
                        "(`ccgw models` lists the offered models)")
-    return run([executable, *claude_args(argv, env["ANTHROPIC_MODEL"])], env)
+    return run([executable, *claude_args(argv, env["ANTHROPIC_MODEL"],
+                                         skip_permissions=skip_permissions)], env)
 
 
 if __name__ == "__main__":
