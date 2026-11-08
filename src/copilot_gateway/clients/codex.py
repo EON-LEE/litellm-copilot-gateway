@@ -5,6 +5,7 @@
     ccx -m claude-sonnet-5.5    # any Copilot model id (plain upstream ids)
     ccx code [path]             # VS Code (separate profile) with the Codex extension on the gateway
     ccx --no-refresh ...        # skip the catalog refresh
+    ccx --sync-model-picker app-server # show only this account's models in Orca
 
 Codex runs with an isolated CODEX_HOME (<data>/codex), so your normal
 ~/.codex setup (ChatGPT login, providers) is untouched.
@@ -21,6 +22,7 @@ import tomllib
 from .. import catalog, gateway, services
 from ..settings import Settings
 from .claude import run
+from . import codex_rpc, model_picker
 
 PROVIDER = "copilot_gateway"
 TOP_BEGIN = "# >>> ccgw managed: provider selection (rewritten by ccx) >>>"
@@ -184,16 +186,27 @@ def codex_env(settings, key, base=None):
 def main(argv=None):
     gateway.safe_console()
     argv = list(sys.argv[1:] if argv is None else argv)
+    do_refresh, sync_picker = True, False
+    while argv and argv[0] in ("--no-refresh", "--sync-model-picker"):
+        option = argv.pop(0)
+        if option == "--no-refresh":
+            do_refresh = False
+        else:
+            sync_picker = True
     if gateway.is_help(argv):
         gateway.eprint(__doc__)
         executable = find_codex()
         return run([executable, *argv], dict(os.environ)) if executable else 0
-    do_refresh = True
-    if argv[:1] == ["--no-refresh"]:
-        do_refresh, argv = False, argv[1:]
+    if sync_picker:
+        try:
+            codex_rpc.validate_arguments(argv)
+        except services.ServiceError as error:
+            gateway.eprint(f"ERROR: {error}")
+            return 1
     settings = Settings.load()
     try:
-        gateway.ensure(settings, ["codex"], do_refresh=do_refresh)
+        extra = {"require_refresh": True} if sync_picker else {}
+        gateway.ensure(settings, ["codex"], do_refresh=do_refresh, **extra)
         write_codex_home(settings, default_model(settings))
         warning = model_warning(settings, argv)
     except (services.ServiceError, RuntimeError, OSError) as error:
@@ -201,6 +214,8 @@ def main(argv=None):
         return 1
     if warning:
         gateway.eprint(warning)
+        if sync_picker and chosen_model(argv) is not None:
+            return 1
     env = codex_env(settings, settings.master_key())
     if argv[:1] == ["code"]:
         code = find_vscode()
@@ -216,6 +231,15 @@ def main(argv=None):
         gateway.eprint("ERROR: Codex not found. Install it (`npm i -g @openai/codex`) or the VS Code "
                        "extension openai.chatgpt, or set CCX_CODEX")
         return 1
+    if sync_picker:
+        try:
+            model_picker.require_version(executable, "Codex", model_picker.CODEX_MIN_VERSION)
+            config = catalog.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))
+            models = model_picker.load_codex_picker(settings, config, executable, env, saved_model(settings))
+        except (services.ServiceError, OSError) as error:
+            gateway.eprint(f"ERROR: {error}")
+            return 1
+        return codex_rpc.run([executable, *argv], env, models)
     return run([executable, *argv], env)
 
 

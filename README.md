@@ -80,14 +80,16 @@ Orca 작업공간이 **실행되는 머신**에 게이트웨이와 Claude Code·
 
 | 에이전트 | Command |
 |---|---|
-| Claude | `ccp --respect-permissions` |
-| Codex | `ccx` |
+| Claude | `ccp --respect-permissions --sync-model-picker` |
+| Codex | `ccx --sync-model-picker` |
 
 Orca가 명령을 찾지 못하면 `ccp`·`ccx`의 절대 경로를 쓰고, 공백이 있는 경로는 따옴표로 감싼다. Orca의 권한 모드와 Arguments가 실제 권한을 결정한다. Orca의 기본값은 권한 확인을 건너뛸 수 있으므로 필요하면 **Settings → Agents → Agent Permissions**에서 바꾼다.
 
 `ccx`는 별도의 `CODEX_HOME`을 쓰므로 Orca의 다른 Codex 계정·폴더 신뢰 설정과 공유되지 않는다. Codex가 폴더 신뢰를 물으면 실제 경로를 확인하고 신뢰하는 경우에만 승인한다. Orca의 계정 전환은 게이트웨이의 Copilot 로그인을 바꾸지 않으며, 로그인 변경은 `ccgw login`으로 관리한다.
 
-Orca 네이티브 채팅의 모델 선택기는 게이트웨이 전체 목록 대신 기본 모델이나 클라이언트 별칭만 표시할 수 있다. 실제 제공 모델은 `ccgw models`에서 확인하고, 필요하면 Orca 작업공간에서 `orca agent launch --agent codex --model <Copilot-ID>` 또는 `orca agent launch --agent claude --model <ccp-이름>`으로 명시한다. 제공되지 않는 Claude 계열 별칭은 선택해도 동작하지 않는다.
+`--sync-model-picker`는 실행할 때마다 Copilot 계정의 최신 공개 모델 목록을 가져와 Claude Code와 Codex의 선택기에 반영한다. 기존 채팅에서 더 이상 제공되지 않는 모델이 현재 선택으로 남을 수 있다. 이 경우 제공되는 모델을 직접 다시 선택하며, 채팅 기록은 지우지 않는다. 제공되지 않는 모델을 명시하면 다른 모델로 바꾸지 않고 오류를 낸다. `--no-refresh`와 이 옵션을 함께 사용할 수 없고, 카탈로그 갱신에 실패하면 오래된 목록을 표시하는 대신 시작을 중단한다. Claude Code 2.1.318 이상과 Codex 0.167.0 이상이 필요하다.
+
+이 옵션은 명시한 실행에만 적용되므로 기존 `ccp`·`ccx`와 Windows 설정은 바뀌지 않는다. Claude의 기존 `--settings`와 Orca 권한 설정은 유지한다. Codex는 app-server의 모델 목록만 필터링하므로 모델의 기본 프롬프트·도구 동작과 기존 `CODEX_HOME` 설정은 바뀌지 않는다. Codex 동기화 옵션은 Orca처럼 stdio app-server를 실행할 때만 사용할 수 있으며, `ccx code`나 일반 CLI에는 적용할 수 없다.
 
 ### 기존 bash 버전에서 이전
 
