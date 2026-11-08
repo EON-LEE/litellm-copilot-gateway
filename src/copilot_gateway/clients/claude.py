@@ -7,6 +7,7 @@ set only for this child process.
     ccp --model claude-gpt-6.1-sol
     ccp --no-refresh ...      # skip the catalog refresh (faster start)
     ccp --respect-permissions ...  # let the caller control Claude's permissions
+    ccp --sync-model-picker ...   # show only this account's models
 """
 from __future__ import annotations
 
@@ -14,9 +15,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from .. import catalog, gateway, services
 from ..settings import Settings
+from . import model_picker
 
 FAMILY_VARS = (("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"), ("ANTHROPIC_DEFAULT_SONNET_MODEL", "sonnet"),
                ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "haiku"), ("ANTHROPIC_DEFAULT_FABLE_MODEL", "fable"))
@@ -78,14 +81,68 @@ def claude_args(argv, model, *, skip_permissions=True):
     return [*prefix, "--model", model, *argv]
 
 
-def run(command, env):
+def picker_model(value, env, config):
+    """Resolve only aliases which name an offered model; never substitute another family."""
+    requested = value
+    family = None
+    aliases = config["router_settings"]["model_group_alias"]
+    served = {row["model_name"] for row in config["model_list"]}
+    if value == "default":
+        value = model_defaults(config)["ANTHROPIC_MODEL"]
+    elif value in {"opus", "sonnet", "haiku", "fable", "opus[1m]", "sonnet[1m]", "fable[1m]"}:
+        family, suffix = (value.split("[", 1)[0], "[1m]" if value.endswith("[1m]") else "")
+        slot = next(name for name, candidate in FAMILY_VARS if candidate == family)
+        value = env.get(slot, "") + suffix
+    target = aliases.get(value, {}).get("model", value)
+    if target not in served or (family and not target.startswith(f"claude-{family}-")):
+        raise services.ServiceError(f"Claude model '{requested}' is not offered by this Copilot account")
+    return value
+
+
+def explicit_model(argv):
+    chosen = None
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            break
+        if arg == "--model":
+            index += 1
+            if index >= len(argv) or argv[index].startswith("-"):
+                raise services.ServiceError("--model requires a value")
+            chosen = argv[index]
+        elif arg.startswith("--model="):
+            chosen = arg.partition("=")[2]
+        index += 1
+    return chosen
+
+
+def run(command, env, *, wait=False):
     try:
-        if os.name == "posix":
+        if os.name == "posix" and not wait:
             os.execvpe(command[0], command, env)
-        # Windows has no exec: keep Ctrl+C for the child, then mirror its exit code.
         import signal
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        return subprocess.call(command, env=env)
+        if os.name == "nt":
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            return subprocess.call(command, env=env)
+        child = subprocess.Popen(command, env=env)
+
+        def forward(signum, _frame):
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass
+
+        previous = signal.signal(signal.SIGTERM, forward)
+        try:
+            try:
+                result = child.wait()
+            except KeyboardInterrupt:
+                forward(signal.SIGINT, None)
+                result = child.wait()
+            return result if result >= 0 else 128 - result
+        finally:
+            signal.signal(signal.SIGTERM, previous)
     except OSError as error:
         gateway.eprint(f"ERROR: cannot run {command[0]}: {error}")
         return 127
@@ -94,20 +151,23 @@ def run(command, env):
 def main(argv=None):
     gateway.safe_console()
     argv = list(sys.argv[1:] if argv is None else argv)
-    do_refresh, skip_permissions = True, True
-    while argv and argv[0] in ("--no-refresh", "--respect-permissions"):
+    do_refresh, skip_permissions, sync_picker = True, True, False
+    while argv and argv[0] in ("--no-refresh", "--respect-permissions", "--sync-model-picker"):
         option = argv.pop(0)
         if option == "--no-refresh":
             do_refresh = False
-        else:
+        elif option == "--respect-permissions":
             skip_permissions = False
+        else:
+            sync_picker = True
     if gateway.is_help(argv):
         gateway.eprint(__doc__)
         executable = os.environ.get("CCP_CLAUDE") or shutil.which("claude")
         return run([executable, *argv], dict(os.environ)) if executable else 0
     settings = Settings.load()
     try:
-        gateway.ensure(settings, ["claude"], do_refresh=do_refresh)
+        extra = {"require_refresh": True} if sync_picker else {}
+        gateway.ensure(settings, ["claude"], do_refresh=do_refresh, **extra)
     except (services.ServiceError, RuntimeError) as error:
         gateway.eprint(f"ERROR: {error}")
         return 1
@@ -121,8 +181,24 @@ def main(argv=None):
     for name, value in unavailable_models(env, config):
         gateway.eprint(f"⚠️  {name}={value} is not offered by this Copilot account; requests for it will fail "
                        "(`ccgw models` lists the offered models)")
-    return run([executable, *claude_args(argv, env["ANTHROPIC_MODEL"],
-                                         skip_permissions=skip_permissions)], env)
+    args = claude_args(argv, env["ANTHROPIC_MODEL"], skip_permissions=skip_permissions)
+    if not sync_picker:
+        return run([executable, *args], env)
+    try:
+        model_picker.require_version(executable, "Claude Code", model_picker.CLAUDE_MIN_VERSION)
+        chosen = explicit_model(args)
+        if chosen is not None:
+            picker_model(chosen, env, config)
+        env["ANTHROPIC_DEFAULT_MODEL"] = picker_model(
+            env.get("ANTHROPIC_DEFAULT_MODEL") or env["ANTHROPIC_MODEL"], env, config)
+        directory = settings.home / "claude-picker"
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="settings-", dir=directory) as temp:
+            args = model_picker.claude_settings_args(args, config, os.path.join(temp, "settings.json"))
+            return run([executable, *args], env, wait=True)
+    except (services.ServiceError, OSError) as error:
+        gateway.eprint(f"ERROR: {error}")
+        return 1
 
 
 if __name__ == "__main__":

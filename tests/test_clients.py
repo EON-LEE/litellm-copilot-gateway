@@ -200,9 +200,13 @@ class HelpTests(unittest.TestCase):
                     self.assertEqual(codex.main(argv), 0)
                     self.assertEqual(claude.main(argv), 0)
             for argv in (["--respect-permissions", "--help"], ["--no-refresh", "--respect-permissions", "--version"],
-                         ["--respect-permissions", "--no-refresh", "--help"]):
+                         ["--respect-permissions", "--no-refresh", "--help"],
+                         ["--sync-model-picker", "--help"]):
                 with self.subTest(argv=argv):
                     self.assertEqual(claude.main(argv), 0)
+            for argv in (["--no-refresh", "--help"], ["--sync-model-picker", "--help"]):
+                with self.subTest(argv=argv):
+                    self.assertEqual(codex.main(argv), 0)
 
     def test_claude_launcher_options_are_consumed_in_either_order(self):
         from unittest import mock

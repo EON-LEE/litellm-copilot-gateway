@@ -144,8 +144,10 @@ def start_capi(settings, table, credential, log=eprint):
     run_service(settings, table["capi"], credential, restart=sync_web_search(settings, log), log=log)
 
 
-def ensure(settings: Settings, targets, do_refresh=True, log=eprint) -> dict:
+def ensure(settings: Settings, targets, do_refresh=True, log=eprint, require_refresh=False) -> dict:
     """Make sure copilot-api and the requested LiteLLM instances run current configs and the current login."""
+    if require_refresh and not do_refresh:
+        raise services.ServiceError("model picker synchronization requires a live catalog refresh")
     key = settings.master_key()
     credential = auth.fingerprint(settings.token_dir)
     auth.secure(settings.token_dir)
@@ -157,6 +159,8 @@ def ensure(settings: Settings, targets, do_refresh=True, log=eprint) -> dict:
             changed = refresh(settings)
             log("   " + ", ".join(f"{t}: {'updated' if changed[t] else 'unchanged'}" for t in TARGETS))
         except (catalog.CatalogError, OSError) as error:
+            if require_refresh:
+                raise services.ServiceError(f"model refresh failed; cannot synchronize the picker: {error}") from None
             missing = [t for t in targets if not config_for(settings, t).exists()]
             if missing:
                 raise services.ServiceError(f"model refresh failed ({error}) and no existing config for "

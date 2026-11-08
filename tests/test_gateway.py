@@ -89,6 +89,14 @@ class CredentialTests(unittest.TestCase):
             self.assertEqual(gateway.apply_login(self.settings), ["capi", "codex"])
             ensure.assert_called_once_with(self.settings, ["codex"], do_refresh=False, log=mock.ANY)
 
+    def test_picker_refresh_failure_never_uses_an_old_account_catalog(self):
+        with self.assertRaisesRegex(services.ServiceError, "requires a live catalog refresh"):
+            gateway.ensure(self.settings, ["claude"], do_refresh=False, require_refresh=True)
+        with mock.patch.object(gateway, "refresh", side_effect=OSError("offline")), \
+                self.assertRaisesRegex(services.ServiceError, "cannot synchronize the picker"):
+            gateway.ensure(self.settings, ["claude"], require_refresh=True, log=lambda *_: None)
+        self.start.assert_not_called()
+
 
 class SpawnEnvTests(unittest.TestCase):
     def test_secret_env_is_added_only_to_the_child(self):
