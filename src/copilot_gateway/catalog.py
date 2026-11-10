@@ -54,7 +54,8 @@ def token_limit(limits, key, required=False):
     return value
 
 
-def select_models(catalog):
+def select_models(catalog, exclude=()):
+    """User-visible, policy-enabled chat models, minus the Copilot ids in `exclude` (CCGW_EXCLUDE_MODELS)."""
     rows = catalog.get("data") if isinstance(catalog, dict) else None
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         raise CatalogError("invalid Copilot catalog: expected data array")
@@ -74,7 +75,7 @@ def select_models(catalog):
         if model_id in seen:
             raise CatalogError(f"duplicate Copilot model id: {model_id}")
         seen.add(model_id)
-        if re.search(r"internal[\s_-]*only", name, re.IGNORECASE):
+        if re.search(r"internal[\s_-]*only", name, re.IGNORECASE) or model_id in exclude:
             continue
         policy = row.get("policy")
         if policy is None:
@@ -156,7 +157,7 @@ def claude_name(model_id):
     return model_id if model_id.startswith("claude-") else f"claude-{model_id}"
 
 
-def build_config(catalog, capi_base="http://127.0.0.1:4141"):
+def build_config(catalog, capi_base="http://127.0.0.1:4141", exclude=()):
     """LiteLLM config for Claude Code (Anthropic Messages clients)."""
     def params_for(row):
         model_id, endpoints = row["id"], row["endpoints"]
@@ -177,10 +178,10 @@ def build_config(catalog, capi_base="http://127.0.0.1:4141"):
             values |= {f"{value}[1m]" for value in values}
         return values
 
-    return _assemble(select_models(catalog), claude_name, params_for, spellings)
+    return _assemble(select_models(catalog, exclude), claude_name, params_for, spellings)
 
 
-def build_codex_config(catalog, capi_base="http://127.0.0.1:4141"):
+def build_codex_config(catalog, capi_base="http://127.0.0.1:4141", exclude=()):
     """LiteLLM config for Codex (OpenAI Responses clients)."""
     def params_for(row):
         model_id, endpoints = row["id"], row["endpoints"]
@@ -201,7 +202,7 @@ def build_codex_config(catalog, capi_base="http://127.0.0.1:4141"):
             return {"unsupported_tool_types": list(XAI_UNSUPPORTED_TOOL_TYPES)}
         return {}
 
-    config = _assemble(select_models(catalog), lambda model_id: model_id, params_for, spellings, extra_info)
+    config = _assemble(select_models(catalog, exclude), lambda model_id: model_id, params_for, spellings, extra_info)
     config["litellm_settings"]["callbacks"] = [CODEX_CALLBACK]
     return config
 

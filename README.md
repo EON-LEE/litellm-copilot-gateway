@@ -65,6 +65,9 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 ```
 
 - `ccp`/`ccx`는 실행마다 Copilot 카탈로그를 새로 받아 설정을 갱신하고(`--no-refresh`로 생략), 필요한 서비스만 띄운다. 갱신 실패 시 기존 설정으로 기동.
+- **모델 목록은 재시작 없이 반영된다.** 실행 중인 LiteLLM은 생성된 설정 파일을 2초마다 확인한다. `model_list`와 숨김 별칭만 바뀌었으면 라우터에 바로 적용하고, 적용한 설정을 `<data>/run/<서비스>.loaded`에 기록한다. `ccp`·`ccx`·`ccgw start`·`ccgw refresh`는 이 기록을 확인하고, 반영되지 않았을 때만 재시작한다. 모델 목록 외의 설정이 바뀌면 로그에 재시작이 필요하다고 남기고 `ccgw refresh`가 `ccgw restart <서비스>`를 안내한다.
+  - LiteLLM은 `CCGW_REFRESH_MINUTES`(기본 60분, `0`은 끔)마다 직접 카탈로그를 다시 받는다. 그래서 Orca처럼 `ccp`/`ccx`를 거치지 않는 클라이언트에도 새 모델이 반영된다. 이 경로는 copilot-api(:4141)를 재시작하지 않는다. WebSearch 보조 모델 동기화는 다음 `ccgw start`/`ccp` 때 이뤄진다.
+- **모델 제외**: `CCGW_EXCLUDE_MODELS`(환경변수 또는 `<data>/.env`, 쉼표·공백 구분)에 Copilot 모델 ID를 적으면 두 설정 모두에서 해당 모델과 숨김 별칭을 뺀다. 종료 예정 모델을 미리 빼는 데 쓴다. 다른 모델로 리다이렉트하지 않으므로 그 이름으로 요청하면 오류가 난다. 카탈로그에는 종료 일정 정보가 없어서 자동으로 판단하지 않는다.
 - `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존한다. 기본 모델은 코드에 고정하지 않고 실행할 때 받은 카탈로그에서 고른다.
   - 메인 모델과 `sonnet`: 계정에서 제공하는 최신 Sonnet. Sonnet이 없으면 메인은 Opus, Haiku 순으로 고른다.
   - `opus`·`haiku`·`fable`: 각 계열의 최신 버전(`-fast` 같은 변형 제외). 구버전 Claude Code가 읽는 `ANTHROPIC_SMALL_FAST_MODEL`은 `haiku`와 같다.
@@ -113,7 +116,7 @@ Codex CLI/VS Code ─/v1/responses─▶ LiteLLM :4001 (Responses) ─┼─▶ 
 | macOS | `~/Library/Application Support/copilot-gateway` |
 | Linux/WSL | `${XDG_DATA_HOME:-~/.local/share}/copilot-gateway` |
 
-`.env`(마스터키), `config.yaml`(Claude용), `config-codex.yaml`(Codex용, 자동 생성 — 직접 편집 금지), `logs/`, `codex/`(CODEX_HOME), `copilot-api/`, `run/`(서비스별 로그인 지문).
+`.env`(마스터키), `config.yaml`(Claude용), `config-codex.yaml`(Codex용, 자동 생성 — 직접 편집 금지), `logs/`, `codex/`(CODEX_HOME), `copilot-api/`, `run/`(서비스별 로그인 지문, 모델 목록 핫 리로드 기록 `<서비스>.loaded`).
 GitHub 로그인 토큰: `~/.config/litellm/github_copilot/` (아래 "Copilot 계정" 참고).
 
 ## Copilot 계정
