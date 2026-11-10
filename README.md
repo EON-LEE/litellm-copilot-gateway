@@ -68,7 +68,7 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 - **모델 목록은 재시작 없이 반영된다.** 실행 중인 LiteLLM은 생성된 설정 파일을 2초마다 확인한다. `model_list`와 숨김 별칭만 바뀌었으면 라우터에 바로 적용하고, 적용한 설정을 `<data>/run/<서비스>.loaded`에 기록한다. `ccp`·`ccx`·`ccgw start`·`ccgw refresh`는 이 기록을 확인하고, 반영되지 않았을 때만 재시작한다. 모델 목록 외의 설정이 바뀌면 로그에 재시작이 필요하다고 남기고 `ccgw refresh`가 `ccgw restart <서비스>`를 안내한다.
   - LiteLLM은 `CCGW_REFRESH_MINUTES`(기본 60분, `0`은 끔)마다 직접 카탈로그를 다시 받는다. 그래서 Orca처럼 `ccp`/`ccx`를 거치지 않는 클라이언트에도 새 모델이 반영된다. 이 경로는 copilot-api(:4141)를 재시작하지 않는다. WebSearch 보조 모델 동기화는 다음 `ccgw start`/`ccp` 때 이뤄진다.
 - **모델 제외**: `CCGW_EXCLUDE_MODELS`(환경변수 또는 `<data>/.env`, 쉼표·공백 구분)에 Copilot 모델 ID를 적으면 두 설정 모두에서 해당 모델과 숨김 별칭을 뺀다. 종료 예정 모델을 미리 빼는 데 쓴다. 다른 모델로 리다이렉트하지 않으므로 그 이름으로 요청하면 오류가 난다. 카탈로그에는 종료 일정 정보가 없어서 자동으로 판단하지 않는다.
-- `ccp`는 항상 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존한다. 기본 모델은 코드에 고정하지 않고 실행할 때 받은 카탈로그에서 고른다.
+- `ccp`는 기본적으로 `--dangerously-skip-permissions`로 실행되고, 사용자가 준 `--model`·환경변수는 보존한다. `ccp --respect-permissions`는 이 플래그를 추가하지 않아 호출자 또는 Claude Code의 권한 설정을 따른다. 기본 모델은 코드에 고정하지 않고 실행할 때 받은 카탈로그에서 고른다.
   - 메인 모델과 `sonnet`: 계정에서 제공하는 최신 Sonnet. Sonnet이 없으면 메인은 Opus, Haiku 순으로 고른다.
   - `opus`·`haiku`·`fable`: 각 계열의 최신 버전(`-fast` 같은 변형 제외). 구버전 Claude Code가 읽는 `ANTHROPIC_SMALL_FAST_MODEL`은 `haiku`와 같다.
   - 계정에 없는 계열은 설정하지 않는다. 그 슬롯을 고르면 오류가 나며, 다른 계열로 대체하지 않는다.
@@ -76,6 +76,23 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 - `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 쓰므로 평소 `~/.codex`(ChatGPT 로그인 등)는 그대로다. 첫 실행 때 `config.toml`에 저장하는 기본 모델은 `CCX_MODEL`, 없으면 카탈로그의 `powerful` 등급 OpenAI Responses 모델 중 최신 버전이다. 저장된 모델이나 `-m` 모델이 카탈로그에 없으면 경고만 하고 바꾸지 않는다(`/model` 또는 `ccx -m`으로 변경). 실행 파일 지정: `CCX_CODEX`(없으면 PATH의 `codex`, Windows winget 패키지, 그다음 VS Code 확장 번들 `codex`).
 - `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요). macOS에서 `code` 명령이 PATH에 없으면 `~/Applications`, `/Applications` 순서로 VS Code 앱을 찾는다.
 - 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
+
+### Orca에서 사용
+
+Orca 작업공간이 **실행되는 머신**에 게이트웨이와 Claude Code·Codex를 각각 설치하고 `ccgw setup`을 마친다. 로컬 Mac과 원격 Orca 서버는 설치·로그인이 별개다. Orca의 **Settings → Agents**에서 각 에이전트의 **Command**를 다음으로 지정하면 기존 에이전트 선택 메뉴와 채팅에서도 게이트웨이를 사용한다.
+
+| 에이전트 | Command |
+|---|---|
+| Claude | `ccp --respect-permissions --sync-model-picker` |
+| Codex | `ccx --sync-model-picker` |
+
+Orca가 명령을 찾지 못하면 `ccp`·`ccx`의 절대 경로를 쓰고, 공백이 있는 경로는 따옴표로 감싼다. Orca의 권한 모드와 Arguments가 실제 권한을 결정한다. Orca의 기본값은 권한 확인을 건너뛸 수 있으므로 필요하면 **Settings → Agents → Agent Permissions**에서 바꾼다.
+
+`ccx`는 별도의 `CODEX_HOME`을 쓰므로 Orca의 다른 Codex 계정·폴더 신뢰 설정과 공유되지 않는다. Codex가 폴더 신뢰를 물으면 실제 경로를 확인하고 신뢰하는 경우에만 승인한다. Orca의 계정 전환은 게이트웨이의 Copilot 로그인을 바꾸지 않으며, 로그인 변경은 `ccgw login`으로 관리한다.
+
+`--sync-model-picker`는 실행할 때마다 Copilot 계정의 최신 공개 모델 목록을 가져와 Claude Code와 Codex의 선택기에 반영한다. 기존 채팅에서 더 이상 제공되지 않는 모델이 현재 선택으로 남을 수 있다. 이 경우 제공되는 모델을 직접 다시 선택하며, 채팅 기록은 지우지 않는다. 제공되지 않는 모델을 명시하면 다른 모델로 바꾸지 않고 오류를 낸다. `--no-refresh`와 이 옵션을 함께 사용할 수 없고, 카탈로그 갱신에 실패하면 오래된 목록을 표시하는 대신 시작을 중단한다. Claude Code 2.1.318 이상과 Codex 0.167.0 이상이 필요하다.
+
+이 옵션은 명시한 실행에만 적용되므로 기존 `ccp`·`ccx`와 Windows 설정은 바뀌지 않는다. Claude의 기존 `--settings`와 Orca 권한 설정은 유지한다. Codex는 app-server의 모델 목록만 필터링하므로 모델의 기본 프롬프트·도구 동작과 기존 `CODEX_HOME` 설정은 바뀌지 않는다. Codex 동기화 옵션은 Orca처럼 stdio app-server를 실행할 때만 사용할 수 있으며, `ccx code`나 일반 CLI에는 적용할 수 없다.
 
 ### 기존 bash 버전에서 이전
 
@@ -182,7 +199,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | 카탈로그 기본값: `ccp` 메인 `claude-sonnet-5.5` Write 루프, haiku 슬롯 `claude-haiku-5.5` 응답, `ccx` 기본 `gpt-6.1-sol` 파일+셸 — WSL | ✅ (2026-11) |
 | 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`)과 실행 중 copilot-api 재시작, 교정 후 실검색(JSON·스트림, copilot-api 사용 기록에서 `gpt-6-luna` 확인) — WSL | ✅ (2026-11) |
 | 로그인 통일: copilot-api가 예전에 저장한 잘못된 토큰 파일을 무시하고 게이트웨이 로그인으로 기동(모델 목록 수신), 같은 로그인은 재사용, `.env`로 토큰 폴더를 바꾸면 3개 서비스 재시작, 토큰 권한 644 → 600 교정, `ccgw login`·`doctor`의 계정 표시 — WSL 격리 기동 | ✅ (2026-11, 추론 요청 없음) |
-| macOS: Node 요구 버전 확인, VS Code 앱 경로 탐색 | CI(macos-latest) 단위 테스트만. 실제 Mac 실행은 미검증 |
+| macOS: 실제 Mac에서 게이트웨이 서비스와 Orca 연동 확인, Claude·Codex CLI가 로컬 모의 업스트림의 스트리밍 응답 수신 | ✅ (2026-11, 실제 Copilot 추론 미검증) |
 | 실사용 설치(2026-11-04): WSL — 기존 `ccp` alias가 shim을 거쳐 새 패키지 실행, 기존 copilot-api 설정의 WebSearch 모델 교정. Windows — 조직 PyPI·npm 미러로 설치, `ccgw login` device 로그인 승인과 계정 표시. 두 환경 모두 `ccp` 응답·WebSearch 실검색·`ccx` 응답 | ✅ |
 | `ccx code` VS Code 확장 대화 — Windows | ✅ |
 | Claude Code: 스트리밍 · thinking · 비전 · 캐싱 (bash 버전, 2026-08) | ✅ 동일 라우팅 유지 |
