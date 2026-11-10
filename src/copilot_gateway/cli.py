@@ -67,24 +67,37 @@ def cmd_login(settings, args):
 
 def cmd_refresh(settings, args):
     changed = gateway.refresh(settings)
+    table = gateway.build_services(settings)
+    restart = []
     for target, path in (("claude", settings.claude_config), ("codex", settings.codex_config)):
         rows = catalog.parse_rendered(path.read_text(encoding="utf-8"))["model_list"]
-        print(f"{target:<7} {'updated' if changed[target] else 'unchanged':<9} {len(rows)} models  {path}")
-    if any(changed.values()):
-        print("Apply with: ccgw restart")
+        note = ""
+        if changed[target] and services.inspect(table[target]).status == "running":
+            if gateway.hot_reloaded(settings, table[target]):
+                note = "  (applied to the running service)"
+            else:
+                restart.append(target)
+                note = "  (running service needs a restart)"
+        print(f"{target:<7} {'updated' if changed[target] else 'unchanged':<9} {len(rows)} models  {path}{note}")
+    if settings.exclude_models:
+        print("excluded (CCGW_EXCLUDE_MODELS): " + ", ".join(sorted(settings.exclude_models)))
+    if restart:
+        print("Apply with: ccgw restart " + " ".join(restart))
     return 0
 
 
 def cmd_models(settings, args):
     from .clients import claude
     value = catalog.fetch_catalog(settings.token_dir)
-    codex_config = catalog.build_codex_config(value)
+    codex_config = catalog.build_codex_config(value, exclude=settings.exclude_models)
     print(catalog.format_models(codex_config))
     print("\nClaude Code (ccp) names: claude-<id> (Claude ids unchanged). Codex (ccx) names: the Copilot ID.")
-    defaults = claude.model_defaults(catalog.build_config(value))
+    defaults = claude.model_defaults(catalog.build_config(value, exclude=settings.exclude_models))
     slots = ", ".join(f"{family} {defaults.get(name, '-')}" for name, family in claude.FAMILY_VARS)
     print(f"Defaults: ccp {defaults['ANTHROPIC_MODEL']} ({slots}); ccx {catalog.codex_default(codex_config) or '-'}"
           "  ('-' = not offered by this account)")
+    if settings.exclude_models:
+        print("Excluded (CCGW_EXCLUDE_MODELS): " + ", ".join(sorted(settings.exclude_models)))
     return 0
 
 

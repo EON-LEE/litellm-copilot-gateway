@@ -5,18 +5,24 @@ same code behaves identically on Windows, macOS, Linux, and WSL. Override it
 with CCGW_HOME. Values in ``<data>/.env`` act as defaults for the CCGW_*,
 GITHUB_COPILOT_TOKEN_DIR and LITELLM_MASTER_KEY settings; the process
 environment wins for CCGW_* values and GITHUB_COPILOT_TOKEN_DIR.
+
+CCGW_EXCLUDE_MODELS lists Copilot ids to leave out of the gateway (e.g.
+models announced for retirement); CCGW_REFRESH_MINUTES is how often running
+LiteLLM instances re-fetch the catalog (0 disables).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import secrets
 import sys
 
 APP = "copilot-gateway"
 LEGACY_REPO = Path.home() / "litellm-copilot-gateway"
 DEFAULT_PORTS = {"CCGW_PORT": 4000, "CCGW_CODEX_PORT": 4001, "CCGW_CAPI_PORT": 4141}
+DEFAULT_REFRESH_MINUTES = 60.0
 
 
 def data_dir(environ=None) -> Path:
@@ -72,6 +78,8 @@ class Settings:
     capi_port: int
     token_dir: Path
     file_values: dict
+    exclude_models: frozenset = frozenset()
+    refresh_minutes: float = DEFAULT_REFRESH_MINUTES
 
     @classmethod
     def load(cls, environ=None) -> "Settings":
@@ -79,8 +87,11 @@ class Settings:
         home = data_dir(environ)
         file_values = read_env_file(home / ".env")
 
+        def setting(name):
+            return environ.get(name) or file_values.get(name)
+
         def port(name):
-            raw = environ.get(name) or file_values.get(name) or DEFAULT_PORTS[name]
+            raw = setting(name) or DEFAULT_PORTS[name]
             try:
                 value = int(raw)
             except ValueError:
@@ -94,8 +105,15 @@ class Settings:
                      else Path.home() / ".config" / "litellm" / "github_copilot")
         if not token_dir.is_absolute():
             raise SystemExit("ERROR: GITHUB_COPILOT_TOKEN_DIR must be an absolute path")
+        exclude = frozenset(item for item in re.split(r"[\s,]+", setting("CCGW_EXCLUDE_MODELS") or "") if item)
+        try:
+            refresh_minutes = float(setting("CCGW_REFRESH_MINUTES") or DEFAULT_REFRESH_MINUTES)
+        except ValueError:
+            refresh_minutes = -1
+        if not 0 <= refresh_minutes < float("inf"):
+            raise SystemExit("ERROR: CCGW_REFRESH_MINUTES must be a number of minutes (0 disables)")
         settings = cls(home, port("CCGW_PORT"), port("CCGW_CODEX_PORT"), port("CCGW_CAPI_PORT"),
-                       token_dir, file_values)
+                       token_dir, file_values, exclude, refresh_minutes)
         ports = (settings.claude_port, settings.codex_port, settings.capi_port)
         if len(set(ports)) != 3:
             raise SystemExit("ERROR: CCGW_PORT, CCGW_CODEX_PORT and CCGW_CAPI_PORT must differ")

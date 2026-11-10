@@ -212,6 +212,29 @@ class RefreshTests(unittest.TestCase):
         with self.assertRaises(cat.CatalogError):
             cat.fetch_catalog(self.settings.token_dir)
 
+    def test_excluded_models_are_dropped_from_both_configs(self):
+        home = TempHome(CCGW_EXCLUDE_MODELS="claude-opus-5, gpt-6-astra")
+        self.addCleanup(home.cleanup)
+        settings = home.settings()
+        self.assertEqual(settings.exclude_models, frozenset({"claude-opus-5", "gpt-6-astra"}))
+        gateway.refresh(settings, catalog())
+        claude = cat.parse_rendered(settings.claude_config.read_text(encoding="utf-8"))
+        codex = cat.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))
+        names = {row["model_name"] for row in claude["model_list"] + codex["model_list"]}
+        aliases = set(claude["router_settings"].get("model_group_alias", {}))
+        self.assertFalse({"claude-opus-5", "claude-opus-5[1m]", "gpt-6-astra"} & (names | aliases))
+        self.assertIn("claude-sonnet-5", names)
+
+    def test_refresh_interval_setting(self):
+        self.assertEqual(self.settings.refresh_minutes, 60.0)
+        home = TempHome(CCGW_REFRESH_MINUTES="0")
+        self.addCleanup(home.cleanup)
+        self.assertEqual(home.settings().refresh_minutes, 0.0)
+        bad = TempHome(CCGW_REFRESH_MINUTES="soon")
+        self.addCleanup(bad.cleanup)
+        with self.assertRaises(SystemExit):
+            bad.settings()
+
 
 class RouterTests(unittest.TestCase):
     def test_public_router_list_has_no_alias_rows_and_aliases_resolve_same_model(self):
