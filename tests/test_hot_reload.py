@@ -142,10 +142,15 @@ from copilot_gateway import catalog as c, hot_reload, litellm_patches
 litellm_patches.install()
 import litellm
 from litellm.proxy import proxy_server
-full = c.build_config(catalog())
+def offline(config):
+    # Fake upstreams: github_copilot params would try to authenticate.
+    for row in config["model_list"]:
+        row["litellm_params"] = {"model": "openai/" + row["model_name"], "api_key": "x"}
+    return config
+full = offline(c.build_config(catalog()))
 router = litellm.Router(model_list=full["model_list"], model_group_alias=full["router_settings"]["model_group_alias"])
 before = set(router.get_model_names())
-hot_reload.apply(router, c.build_config(catalog(), exclude={"claude-opus-5"}))
+hot_reload.apply(router, offline(c.build_config(catalog(), exclude={"claude-opus-5"})))
 after = set(router.get_model_names())
 original = proxy_server.app.router.lifespan_context
 tmp = Path(tempfile.mkdtemp())
