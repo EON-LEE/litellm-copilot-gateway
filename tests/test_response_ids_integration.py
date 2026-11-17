@@ -65,6 +65,7 @@ class ProxyIntegrationTests(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
             env = {**os.environ, "PYTHONPATH": str(helpers.SRC) + os.pathsep + os.environ.get("PYTHONPATH", ""),
                    "LITELLM_LOCAL_MODEL_COST_MAP": "True", "PYTHONDONTWRITEBYTECODE": "1",
+                   "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
                    "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
             with tempfile.TemporaryFile(mode="w+b") as log:
                 process = subprocess.Popen([sys.executable, "-m", "copilot_gateway.litellm_runner",
