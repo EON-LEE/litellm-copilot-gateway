@@ -1,5 +1,6 @@
 """Codex tool filter hook (offline)."""
 import asyncio
+import copy
 import unittest
 
 import helpers
@@ -62,6 +63,58 @@ class StripToolsTests(unittest.TestCase):
             "print(sorted(hooks._router_unsupported('grok-4.7')), sorted(hooks._router_unsupported('gpt-5.5')))\n")
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])
         self.assertIn("['namespace', 'web_search'] []", result.stdout)
+
+
+class ForeignFunctionIdTests(unittest.TestCase):
+    def setUp(self):
+        self.foreign = {"type": "function_call", "id": "call_foreign", "call_id": "call_foreign",
+                        "name": "shell", "arguments": '{"cmd":"pwd"}'}
+        self.output = {"type": "function_call_output", "id": "fco_original",
+                       "call_id": "call_foreign", "output": "ok"}
+
+    def test_only_duplicate_foreign_item_id_is_removed(self):
+        good = {"type": "function_call", "id": "fc_native", "call_id": "call_native",
+                "name": "shell", "arguments": "{}"}
+        unusual = {"type": "function_call", "id": "call_other", "call_id": "call_different"}
+        missing = {"type": "function_call", "call_id": "call_missing"}
+        data = {"input": [copy.deepcopy(self.foreign), copy.deepcopy(self.output), good, unusual, missing,
+                          {"type": "message", "id": "call_foreign"}, "malformed"]}
+        original = copy.deepcopy(data)
+        hooks.strip_foreign_function_ids(data)
+        self.assertNotIn("id", data["input"][0])
+        self.assertEqual(data["input"][0]["call_id"], data["input"][1]["call_id"])
+        self.assertEqual(data["input"][0]["arguments"], original["input"][0]["arguments"])
+        self.assertEqual(data["input"][1:], original["input"][1:])
+        for value in (None, "conversation-id", {}, []):
+            hooks.strip_foreign_function_ids({"input": value})
+
+    def test_applies_only_to_openai_responses(self):
+        hook = hooks.ToolFilter(lambda _: set(), lambda model: model == "gpt")
+        for model, call_type, should_strip in (("gpt", "aresponses", True),
+                                               ("gpt", "acompletion", False),
+                                               ("gemini", "aresponses", False)):
+            with self.subTest(model=model, call_type=call_type):
+                data = {"model": model, "input": [copy.deepcopy(self.foreign), copy.deepcopy(self.output)]}
+                asyncio.run(hook.async_pre_call_hook(None, None, data, call_type))
+                self.assertEqual("id" not in data["input"][0], should_strip)
+                self.assertEqual(data["input"][1], self.output)
+
+    def test_route_lookup_uses_live_router_and_requires_all_deployments_to_match(self):
+        result = helpers.run_python(
+            "import litellm\n"
+            "from litellm.proxy import proxy_server\n"
+            "from copilot_gateway import hooks\n"
+            "proxy_server.llm_router = litellm.Router(model_list=[\n"
+            " {'model_name':'gpt','litellm_params':{'model':'openai/gpt','api_key':'x'},"
+            "  'model_info':{'upstream_vendor':'OpenAI'}},\n"
+            " {'model_name':'grok','litellm_params':{'model':'openai/grok','api_key':'x'},"
+            "  'model_info':{'upstream_vendor':'xAI'}},\n"
+            " {'model_name':'claude','litellm_params':{'model':'anthropic/claude','api_key':'x'},"
+            "  'model_info':{'upstream_vendor':'Anthropic'}}])\n"
+            "print(hooks._router_openai_responses('gpt'), hooks._router_openai_responses('grok'),"
+            " hooks._router_openai_responses('claude'), hooks._router_openai_responses('missing'))\n")
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertIn("True False False False", result.stdout)
 
 
 if __name__ == "__main__":
