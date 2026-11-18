@@ -7,7 +7,7 @@ Windows 네이티브 · macOS · Linux · WSL 에서 **같은 명령**으로 동
 |---|---|
 | `ccp` | Copilot 백엔드로 Claude Code 실행 (평소 `claude`는 영향 없음) |
 | `ccx` | Copilot 백엔드로 Codex CLI 실행, `ccx code` = VS Code(별도 프로필) + Codex 확장 |
-| `ccgw` | 게이트웨이 관리: `setup` `login` `start` `stop` `restart` `status` `refresh` `codex-setup` `models` `logs` `env` `doctor` `paths` |
+| `ccgw` | 게이트웨이 관리: `setup` `login` `start` `stop` `restart` `status` `refresh` `codex-setup` `autostart` `models` `logs` `env` `doctor` `paths` |
 
 ## 설치
 
@@ -88,6 +88,7 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 | 대상 | 위치 | 바꾸는 내용 | 누가 |
 |---|---|---|---|
 | 게이트웨이 | `uv tool` 설치, `<data>`(`ccgw paths`) | 설치 · Copilot 로그인 · 서비스 기동 | `ccgw setup`, `ccgw start` |
+| 상시 기동 (Windows) | 작업 스케줄러 `copilot-gateway-autostart` | 5분마다 꺼진 서비스만 기동. `ccgw`/`ccp`/`ccx`도 서비스를 이 작업으로 띄움 | `ccgw autostart on` |
 | Codex 전역 설정 | `~/.codex/config.toml` (또는 `$CODEX_HOME`) | `# >>> ccgw managed` 블록 2개: `model_provider`, `model_catalog_json`, `[model_providers.copilot_gateway]` | `ccgw codex-setup` (자동) |
 | Codex 모델 카탈로그 | `<data>/codex-model-catalog.json` | 계정 모델 목록 | `ccgw codex-setup`, 이후 `ccgw refresh`·주기 갱신이 자동 재생성 |
 | Claude 전역 설정 | `~/.claude/settings.json`의 `env` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, 기본 모델 변수 | 아래 3단계 스크립트 |
@@ -114,6 +115,16 @@ ccgw codex-setup            # ~/.codex/config.toml 관리 블록 + 모델 카탈
 - **확인**: `ccgw status`에서 capi/claude/codex 모두 `running`. `codex debug models`에 계정 모델이 `"visibility": "list"`로 나온다. `codex exec --skip-git-repo-check -m gpt-6.2-astra "reply only OK"`와 `-m claude-sonnet-5.5`가 `OK`를 반환한다(모델명은 `ccgw models` 기준).
 - `codex-setup`이 "remove … from Codex config.toml"로 중단하면, 예전에 손으로 넣은 `model_provider`/`model_catalog_json`/`[model_providers.*]` 줄을 지우고 다시 실행한다. 처음 수정 시 `config.toml.ccgw-backup`이 남는다.
 - `model`이 없으면 카탈로그 기본값을 넣고, 이미 있으면 유지한다(계정에 없으면 경고만).
+
+Windows에서는 이어서 **반드시** 상시 기동을 켠다(관리자 권한 불필요):
+
+```powershell
+ccgw autostart on           # 작업 스케줄러 등록 + 즉시 실행
+```
+
+- 이유: 터미널·IDE·에이전트(Orca, Copilot 앱)에서 띄운 프로세스는 그 호스트의 Windows **job object**에 묶여, 호스트가 터미널·세션을 닫으면 게이트웨이도 같이 죽는다(`CREATE_BREAKAWAY_FROM_JOB`도 막혀 있음). Orca에서 "됐다 안 됐다" 하는 원인이다. autostart가 켜져 있으면 `ccgw start`·`ccp`·`ccx`는 서비스를 직접 띄우지 않고 이 작업에 맡기고, 작업은 5분마다 꺼진 서비스를 다시 띄운다(부팅·로그온 후 포함).
+- **확인**: `ccgw autostart`가 `autostart on`, `<data>\logs\autostart.log`에 `started`/`already running` 기록. 게이트웨이를 띄운 터미널을 닫아도 `ccgw status`가 계속 `running`.
+- 끄기: `ccgw autostart off`(이후 `ccgw start`는 다시 직접 띄움). macOS/Linux는 launchd/systemd 사용자 서비스에서 `ccgw start --all`을 실행한다.
 
 #### 3. Claude 전역 연결 (`~/.claude/settings.json`)
 
@@ -155,10 +166,11 @@ $s | ConvertTo-Json -Depth 20 | Set-Content $f -Encoding utf8
 | `no rollout found for thread id …` | Orca Command가 `ccx …`라 별도 `CODEX_HOME`(`<data>/codex`)을 써서 기존 채팅을 못 찾는다. 4단계로 기본값 복구. Orca에서 `ccx`를 쓰지 않는다. |
 | Orca 선택기에 새 모델이 없음 | `ccgw refresh` 후 Orca 새 채팅. 그래도 없으면 `codex debug models`로 카탈로그 확인, `ccgw codex-setup` 재실행. |
 | `selector_not_found` / Codex 시작 실패 | 게이트웨이 꺼짐(`ccgw status`) 또는 Command에 남은 `ccx`/`ccp`. `ccgw start; ccgw start codex` 후 Orca 재시작. |
+| 됐다 안 됐다 함 · 로그가 오류 없이 끊기고 서비스가 꺼져 있음 | 게이트웨이를 띄운 터미널/에이전트 세션이 닫히면서 job object가 함께 종료시킨 것. `ccgw autostart on`(2단계). `ccgw autostart`가 `off`면 이 원인이다. |
 | Code Mode host 없음 | 1단계의 Codex 0.167.1+ 수동 설치. |
 | Claude 401/연결 실패 | 3단계 재실행(마스터키 변경) 또는 claude 서비스 기동. |
 
-- 부팅 후에는 `ccgw start; ccgw start codex`를 한 번 실행해야 전역 `codex`/`claude`가 동작한다.
+- autostart를 켜면 부팅·로그온 후 최대 5분 안에 자동 기동된다(바로 쓰려면 `ccgw start --all`). 켜지 않았다면 부팅 후 `ccgw start; ccgw start codex`를 한 번 실행해야 한다.
 - 되돌리기: `config.toml`의 `# >>> ccgw managed` 블록 삭제(또는 `config.toml.ccgw-backup` 복원), `settings.json.ccgw-backup` 복원.
 - `ccp`/`ccx --sync-model-picker`는 Orca 밖에서 stdio app-server를 직접 띄울 때만 쓰는 옵션이다(Claude Code 2.1.318·Codex 0.167.0 이상).
 ### 기존 bash 버전에서 이전

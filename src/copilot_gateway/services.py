@@ -25,6 +25,8 @@ import psutil
 from .settings import LEGACY_REPO
 
 WINDOWS = sys.platform == "win32"
+# Set inside the autostart task itself so it spawns services instead of delegating to itself.
+DIRECT_SPAWN = False
 
 
 class ServiceError(RuntimeError):
@@ -50,6 +52,8 @@ class Service:
     # First launch after install can be slow (Windows Defender scans new node_modules / site-packages);
     # a fresh Windows install was measured at over 3 minutes for one LiteLLM instance.
     startup_timeout: float = 300
+    # Windows autostart module when its scheduled task manages this instance (see autostart.py).
+    scheduler: object | None = None
 
     def classify(self, cmdline) -> str | None:
         """'ours' when the command line is this gateway service, 'legacy' for the bash-era one."""
@@ -223,6 +227,8 @@ def start(service, log=print) -> bool:
     if state.status == "foreign":
         raise ServiceError(f"{service.name}: port {service.port} is in use by another process ({state.detail}). "
                            "Stop it or choose other ports (CCGW_PORT / CCGW_CODEX_PORT / CCGW_CAPI_PORT).")
+    if service.scheduler and service.scheduler.delegate():
+        return _await_scheduled(service, log, service.scheduler)
     process = _spawn(service)
     deadline = time.monotonic() + service.startup_timeout
     last_error = None
@@ -241,6 +247,28 @@ def start(service, log=print) -> bool:
     _abandon(process)
     raise ServiceError(f"{service.name}: not ready after {service.startup_timeout:.0f}s ({last_error}); "
                        f"see {service.log}\n{_log_tail(service.log)}")
+
+
+def _await_scheduled(service, log, autostart) -> bool:
+    """Wait for the autostart task to bring `service` up (it starts every stopped service)."""
+    deadline = time.monotonic() + service.startup_timeout
+    nudge = time.monotonic() + 30
+    last_error = None
+    while time.monotonic() < deadline:
+        if port_open(service.port):
+            try:
+                http_models(service.port, service.auth)
+                log(f"{service.name:<8}: started on 127.0.0.1:{service.port} (scheduled task {autostart.TASK})")
+                return True
+            except (OSError, ValueError, ServiceError, urllib.error.URLError) as error:
+                last_error = error
+        elif time.monotonic() > nudge:  # a run already past this service ignores /Run; ask again
+            autostart.run()
+            nudge = time.monotonic() + 30
+        time.sleep(0.5)
+    raise ServiceError(f"{service.name}: not ready {service.startup_timeout:.0f}s after asking scheduled task "
+                       f"{autostart.TASK} ({last_error}); see {service.log}\n{_log_tail(service.log)}\n"
+                       "Run `ccgw autostart off` to start services directly instead.")
 
 
 def _abandon(process):

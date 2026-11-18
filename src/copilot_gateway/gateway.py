@@ -5,7 +5,7 @@ import os
 import sys
 import time
 
-from . import auth, catalog, copilot_api, hot_reload, services
+from . import auth, autostart, catalog, copilot_api, hot_reload, services
 from .settings import Settings, write_private
 
 TARGETS = ("claude", "codex")
@@ -57,17 +57,19 @@ def build_services(settings: Settings, key: str | None = None) -> dict:
                         "--state", str(reload_state(settings, name)),
                         "--refresh-minutes", f"{settings.refresh_minutes:g}"]
 
+    scheduler = autostart if autostart.serves(settings) else None
     return {
         "capi": services.Service("capi", settings.capi_port, settings.logs / "copilot-api.log", "capi",
-                                 command=capi_command, env={"HOST": "127.0.0.1"}, secret_env=capi_secret_env),
+                                 command=capi_command, env={"HOST": "127.0.0.1"}, secret_env=capi_secret_env,
+                                 scheduler=scheduler),
         "claude": services.Service("claude", settings.claude_port, settings.logs / "litellm-claude.log",
                                    "litellm", config=settings.claude_config,
                                    command=litellm_command("claude", settings.claude_config, settings.claude_port),
-                                   env=litellm_env, auth=key),
+                                   env=litellm_env, auth=key, scheduler=scheduler),
         "codex": services.Service("codex", settings.codex_port, settings.logs / "litellm-codex.log",
                                   "litellm", config=settings.codex_config,
                                   command=litellm_command("codex", settings.codex_config, settings.codex_port),
-                                  env=litellm_env, auth=key),
+                                  env=litellm_env, auth=key, scheduler=scheduler),
     }
 
 
