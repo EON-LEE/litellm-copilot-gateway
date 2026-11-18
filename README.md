@@ -182,6 +182,8 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 - **Codex 기능 범위**: Codex의 ChatGPT 전용 기능(클라우드 태스크, 이미지 생성 등)은 사용 불가. 로컬 에이전트·툴콜·추론은 동작.
 - **copilot-api WebSocket 전송 비활성**: Copilot `ws:/responses`는 gpt-5-mini 스트리밍에서 `internal_error`로 실패(HTTP SSE는 정상, 2026-10 관찰). `ccgw start`가 copilot-api 설정에서 관리하는 키는 `useResponsesApiWebSocket`(`false` 고정)과 `messageApiWebSearchModel`(위 WebSearch 참고) 두 개뿐이다. 업스트림 기본값 표현이 바뀌면 시작을 거부한다.
 - **Codex Windows 샌드박스**: Codex의 Windows 네이티브 샌드박스를 설정하지 않으면(VS Code의 "Finish Windows setup" 등, OS 설정 변경) `-s workspace-write`도 쓰기·명령 실행이 거부된다. 게이트웨이와 무관한 Codex 동작이며, 설정을 마치거나 신뢰하는 폴더에서 `-s danger-full-access`를 쓴다. WSL/Linux/macOS는 해당 없음.
+- **Claude Fable 계열**: Copilot Business·Enterprise에서는 Fable 정책이 기본으로 꺼져 있어 관리자가 켜기 전까지 카탈로그에 나오지 않는다. 켜지면 다음 카탈로그 갱신 때 `fable` 슬롯과 모델 목록에 자동 반영된다.
+- **winget Codex 0.166의 Code Mode**: 이 패키지에는 `codex-code-mode-host.exe`가 없어 "Code Mode is unavailable … host executable was not found"가 나고 Codex가 툴을 쓰지 못한다. 0.167.1 이상으로 올린다. 실행 중인 Codex(Orca 세션 포함)가 실행 파일을 잠그면 `winget upgrade`가 실패하므로 먼저 종료한다.
 - **Windows 첫 시작이 느림**: 새로 설치한 환경에서는 Defender가 파일을 검사하므로 LiteLLM 인스턴스 하나가 시작하는 데 몇 분이 걸릴 수 있다. 2026-11 측정에서 첫 실행은 3분을 넘었고, 다음 실행은 인스턴스당 약 80초였다. 시작 대기 시간은 5분이다.
 - **copilot-api 첫 시작의 models.dev 조회**: copilot-api 2.6.15는 캐시가 없으면 시작할 때 `https://models.dev/api.json`을 15초 안에 받아야 하고, 실패하면 종료한다. 첫 시작이 이 오류로 실패하면 다시 실행한다. 한 번 받은 뒤에는 캐시로 시작한다.
 - **Claude Code `[claude-code:unrecognized_model]` 경고**: WebSearch 보조 모델(`gpt-6-luna` 등 Claude 외 이름)에 대해 출력되는 Claude Code 측 정보성 경고. 요청은 정상 처리된다.
@@ -199,6 +201,7 @@ Claude Code의 WebSearch는 Anthropic 서버사이드 툴(`web_search_20250305`)
 | 신규 모델 `gpt-6.1-terra`·`mai-code-2`: `ccp -p` Write 툴 루프, `ccx exec` 파일 생성+셸 실행 — WSL(Claude Code 2.1.284 · Codex 0.160.0) | ✅ (2026-11) |
 | 카탈로그 기본값: `ccp` 메인 `claude-sonnet-5.5` Write 루프, haiku 슬롯 `claude-haiku-5.5` 응답, `ccx` 기본 `gpt-6.1-sol` 파일+셸 — WSL | ✅ (2026-11) |
 | 종료된 WebSearch 보조 모델 자동 교정(`gpt-5-mini` → `gpt-6-luna`)과 실행 중 copilot-api 재시작, 교정 후 실검색(JSON·스트림, copilot-api 사용 기록에서 `gpt-6-luna` 확인) — WSL | ✅ (2026-11) |
+| 2026-11-18 카탈로그 재검토: 공개 24개(11월 공지 모델 `gpt-6.2-astra`·`gpt-6.2-sol`·`gemini-4-carbon`·`mai-code-2-flash` 포함), 실행 중 서비스에 재시작 없이 반영, `ccx` 기본값 `gpt-6.2-sol`로 자동 변경, `CCGW_EXCLUDE_MODELS` 3개 제외 유지 — Windows. Claude Fable 5·5.1·5.2는 조직 정책이 꺼져 있어 카탈로그에 없음(`fable` 슬롯 `-`) | ✅ (추론 요청 없음) |
 | 로그인 통일: copilot-api가 예전에 저장한 잘못된 토큰 파일을 무시하고 게이트웨이 로그인으로 기동(모델 목록 수신), 같은 로그인은 재사용, `.env`로 토큰 폴더를 바꾸면 3개 서비스 재시작, 토큰 권한 644 → 600 교정, `ccgw login`·`doctor`의 계정 표시 — WSL 격리 기동 | ✅ (2026-11, 추론 요청 없음) |
 | macOS: 실제 Mac에서 게이트웨이 서비스와 Orca 연동 확인, Claude·Codex CLI가 로컬 모의 업스트림의 스트리밍 응답 수신 | ✅ (2026-11, 실제 Copilot 추론 미검증) |
 | 실사용 설치(2026-11-04): WSL — 기존 `ccp` alias가 shim을 거쳐 새 패키지 실행, 기존 copilot-api 설정의 WebSearch 모델 교정. Windows — 조직 PyPI·npm 미러로 설치, `ccgw login` device 로그인 승인과 계정 표시. 두 환경 모두 `ccp` 응답·WebSearch 실검색·`ccx` 응답 | ✅ |
