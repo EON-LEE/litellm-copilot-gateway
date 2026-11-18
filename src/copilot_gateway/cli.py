@@ -285,6 +285,19 @@ def cmd_codex_setup(settings, args):
     return 0
 
 
+def cmd_autostart(settings, args):
+    from . import autostart
+    if args.action == "on":
+        name = autostart.enable()
+        print(f"autostart on   scheduled task {name}: every {autostart.EVERY_MINUTES} min, starts any stopped "
+              "service (capi, claude, codex)")
+    elif args.action == "off":
+        print("autostart off" if autostart.disable() else "autostart was not enabled")
+    else:
+        print(f"autostart {'on' if autostart.is_enabled() else 'off'}")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ccgw", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -296,6 +309,9 @@ def build_parser():
     sub.add_parser("refresh", help="regenerate configs from the live Copilot catalog").set_defaults(func=cmd_refresh)
     sub.add_parser("codex-setup", help="point global ~/.codex (plain `codex`, Orca) at the gateway with this "
                    "account's model list").set_defaults(func=cmd_codex_setup)
+    autostart = sub.add_parser("autostart", help="Windows: keep capi/claude/codex running (scheduled task)")
+    autostart.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
+    autostart.set_defaults(func=cmd_autostart)
     sub.add_parser("models", help="list Copilot models and token limits").set_defaults(func=cmd_models)
     for name, func, help_text in (("start", cmd_start, "start services (default: capi + claude)"),
                                   ("restart", cmd_restart, "restart LiteLLM instances (config reload)")):

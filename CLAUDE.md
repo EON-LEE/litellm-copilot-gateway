@@ -2,7 +2,7 @@
 
 GitHub Copilot 구독 모델을 Claude Code(`ccp`)와 Codex(`ccx`)에서 쓰는 크로스플랫폼 로컬 게이트웨이. 코드는 `src/copilot_gateway/` 파이썬 패키지 하나이며 Windows 네이티브·macOS·Linux·WSL에서 동일하게 동작해야 한다. 아키텍처·검증 현황·알려진 제약은 README.md 참고. 이 파일은 작업 규칙만 담는다.
 
-**새 PC에서 Orca 셋업을 요청받으면** README의 「Orca에서 사용 (새 PC 셋업 가이드)」 절차(1–4단계와 확인 항목)를 그대로 따른다. Orca 에이전트 Command는 기본값(codex/claude)으로 두고 ccx·ccp로 바꾸지 않는다(별도 CODEX_HOME 때문에 기존 채팅이 끊김). Codex 전역 연결은 ccgw codex-setup으로만 하고 ~/.codex/config.toml의 관리 블록을 손으로 고치지 않는다.
+**새 PC에서 Orca 셋업을 요청받으면** README의 「Orca에서 사용 (새 PC 셋업 가이드)」 절차(1–4단계와 확인 항목)를 그대로 따른다. Orca 에이전트 Command는 기본값(codex/claude)으로 두고 ccx·ccp로 바꾸지 않는다(별도 CODEX_HOME 때문에 기존 채팅이 끊김). Codex 전역 연결은 ccgw codex-setup으로만 하고 ~/.codex/config.toml의 관리 블록을 손으로 고치지 않는다. Windows에서는 `ccgw autostart on`을 반드시 켠다 — 터미널·에이전트에서 띄운 서비스는 그 호스트의 job object와 함께 죽기 때문이다(breakaway도 막힘). 이 작업 스케줄러 위임(`autostart.py`, `Service.scheduler`)을 우회하거나 끄지 말 것.
 
 ## 절대 규칙
 
