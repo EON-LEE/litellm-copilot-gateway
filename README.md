@@ -77,32 +77,90 @@ ccgw status                      # 포트 · 소유 프로세스 · readiness
 - `ccx code` 첫 실행(별도 프로필): VS Code 로그인 안내는 "Continue without Signing In"으로 건너뛰고, 폴더를 **Trust**해야 Codex 확장이 켜진다(Restricted Mode에선 비활성). ChatGPT 로그인 없이 바로 게이트웨이로 대화된다. Windows에서 뜨는 "Finish Windows setup" 카드는 Codex 샌드박스 설정이며, 파일 수정·명령 실행을 하려면 진행해야 한다(대화만 할 땐 불필요). macOS에서 `code` 명령이 PATH에 없으면 `~/Applications`, `/Applications` 순서로 VS Code 앱을 찾는다.
 - 다른 셸/IDE에 직접 연결하려면 `ccgw env claude|codex --shell powershell|posix|cmd`.
 
-### Orca에서 사용 (다른 PC 셋업 가이드)
+### Orca에서 사용 (새 PC 셋업 가이드 — 에이전트가 그대로 실행 가능)
 
-Orca는 **기본 명령(`codex`, `claude`) 그대로** 쓴다. 전역 Codex/Claude 설정이 게이트웨이를 가리키게 하므로 Orca 설정을 바꿀 필요가 없고, 채팅 기록도 기본 위치(`~/.codex`, `~/.claude`)에 남아 Orca 재시작 후 이어진다. 게이트웨이는 Orca 작업공간이 **실행되는 머신**마다 따로 설치·로그인한다.
+> 이 절은 다른 PC에서 Copilot/Codex 같은 코딩 에이전트에게 "README대로 Orca 셋업해줘"라고 시키면 그대로 수행할 수 있게 쓴 절차다. 순서대로 실행하고 각 단계의 **확인**을 통과해야 다음으로 넘어간다.
 
-1. 사전 준비: uv, Node.js 22.13+, Git, Codex **0.167.1 이상**, Claude Code. Windows에서 winget Codex 0.166은 `codex-code-mode-host.exe`가 빠져 Code Mode 오류가 나므로 [릴리스](https://github.com/openai/codex/releases)의 0.167.1+ 바이너리를 쓴다.
-2. 설치·로그인
-   ```powershell
-   uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway
-   ccgw setup        # copilot-api 설치 + GitHub device 로그인 (Copilot 계정)
-   ccgw start; ccgw start codex
-   ```
-3. Codex 전역 연결: `ccgw codex-setup`
-   - 계정 카탈로그로 `<data>/codex-model-catalog.json`을 만들고, `~/.codex/config.toml`(또는 `$CODEX_HOME`)에 `model_provider = "copilot_gateway"`, `model_catalog_json`, `[model_providers.copilot_gateway]`(:4001)를 관리 블록으로 쓴다. 처음 수정할 때 `config.toml.ccgw-backup`을 남긴다.
-   - 계정의 모든 모델(GPT·Claude·Gemini·Grok·MAI)이 Codex/Orca 선택기에 나온다. 번들에 없는 모델은 Codex의 미지 모델 기본값과 같은 프롬프트·도구로 동작한다(Codex 버전별로 한 번 프로브해 캐시).
-   - 이후 `ccgw refresh`와 LiteLLM의 주기 갱신이 카탈로그를 자동 재생성한다. 새 모델은 Codex/Orca 새 세션부터 보인다.
-   - 이미 손으로 넣은 `model_provider`/`model_catalog_json`/공급자 테이블이 블록 밖에 있으면 중단하니 먼저 지운다.
-4. Claude 전역 연결: `~/.claude/settings.json`의 `env`에 `ccgw env claude`의 값(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`)과 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, 기본 모델(`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` = `ccgw models`의 Defaults)을 넣는다. 토큰은 커밋·공유하지 않는다.
-5. Orca **Settings → Agents**에서 Claude·Codex의 Command를 비워 기본값으로 두고 Orca를 완전히 종료 후 다시 연다.
-6. 확인: `codex debug models`에 계정 모델이 보이고, `codex exec --skip-git-repo-check -m <모델> "reply OK"`가 응답하면 된다.
+**목표 상태**: Orca는 **기본 명령(`codex`, `claude`) 그대로** 실행되고, 전역 Codex/Claude 설정이 로컬 게이트웨이(:4001/:4000)를 가리킨다. 그래서 Orca 설정은 기본값이고, 채팅 기록은 기본 위치(`~/.codex`, `~/.claude`)에 남아 Orca를 재시작해도 이어지며, 모델 선택기에 Copilot 계정의 모든 모델(GPT·Claude·Gemini·Grok·MAI)이 나온다.
 
-주의:
-- Orca Command를 `ccx …`로 바꾸지 않는다. `ccx`는 격리된 `CODEX_HOME`(`<data>/codex`)을 써서 Orca의 기존 Codex 채팅을 이어갈 수 없다(`no rollout found for thread id`).
-- 게이트웨이가 꺼져 있으면 전역 `codex`/`claude`도 실패한다. 부팅 후 `ccgw start; ccgw start codex`.
-- 전역 연결을 되돌리려면 `config.toml`의 `# >>> ccgw` 관리 블록을 지우거나 백업으로 복원한다.
+#### 무엇을 바꾸는가
 
-`ccp --sync-model-picker`/`ccx --sync-model-picker`는 Orca 대신 직접 stdio app-server를 띄우는 경우를 위한 옵션으로 남아 있다. 실행 때마다 최신 공개 모델 목록을 선택기에 반영하며, Claude Code 2.1.318·Codex 0.167.0 이상이 필요하다.
+| 대상 | 위치 | 바꾸는 내용 | 누가 |
+|---|---|---|---|
+| 게이트웨이 | `uv tool` 설치, `<data>`(`ccgw paths`) | 설치 · Copilot 로그인 · 서비스 기동 | `ccgw setup`, `ccgw start` |
+| Codex 전역 설정 | `~/.codex/config.toml` (또는 `$CODEX_HOME`) | `# >>> ccgw managed` 블록 2개: `model_provider`, `model_catalog_json`, `[model_providers.copilot_gateway]` | `ccgw codex-setup` (자동) |
+| Codex 모델 카탈로그 | `<data>/codex-model-catalog.json` | 계정 모델 목록 | `ccgw codex-setup`, 이후 `ccgw refresh`·주기 갱신이 자동 재생성 |
+| Claude 전역 설정 | `~/.claude/settings.json`의 `env` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, 기본 모델 변수 | 아래 3단계 스크립트 |
+| Orca 에이전트 명령 | Orca **Settings → Agents** → Claude/Codex **Command** | **비워서 기본값**(`claude`, `codex`)으로 둔다 | 사용자 또는 4단계 |
+
+바꾸지 않는 것: 생성된 `<data>/config*.yaml`(직접 수정 금지), Orca의 Arguments·권한 모드, `~/.codex`의 기존 채팅·로그인.
+
+#### 1. 사전 준비 (Windows PowerShell 기준, macOS/Linux도 명령 동일)
+
+- uv, Node.js 22.13+, Git, Claude Code(`winget install Anthropic.ClaudeCode`), Orca.
+- Codex **0.167.1 이상**. winget `OpenAI.Codex` 0.166은 `codex-code-mode-host.exe`가 빠져 "Code Mode is unavailable … host executable was not found" 오류가 난다. 이때는 [릴리스](https://github.com/openai/codex/releases)의 `codex-x86_64-pc-windows-msvc` 0.167.1+ 압축을 풀어 `codex.exe`와 `codex-code-mode-host.exe`를 **같은 폴더**에 두고 그 폴더를 PATH 앞쪽에 둔다.
+- **확인**: `codex --version` ≥ 0.167.1, `claude --version`, `node --version` ≥ 22.13.
+
+#### 2. 게이트웨이 설치 · 로그인 · 기동 · Codex 연결
+
+```powershell
+uv tool install --python 3.13 git+https://github.com/EON-LEE/litellm-copilot-gateway   # 사내망이면 --default-index <PyPI 미러>
+uv tool update-shell        # 새 셸을 연다
+ccgw setup                  # GitHub device 로그인 — 사용자가 브라우저에서 코드 입력 필요
+ccgw start; ccgw start codex
+ccgw codex-setup            # ~/.codex/config.toml 관리 블록 + 모델 카탈로그 생성
+```
+
+- **확인**: `ccgw status`에서 capi/claude/codex 모두 `running`. `codex debug models`에 계정 모델이 `"visibility": "list"`로 나온다. `codex exec --skip-git-repo-check -m gpt-6.2-astra "reply only OK"`와 `-m claude-sonnet-5.5`가 `OK`를 반환한다(모델명은 `ccgw models` 기준).
+- `codex-setup`이 "remove … from Codex config.toml"로 중단하면, 예전에 손으로 넣은 `model_provider`/`model_catalog_json`/`[model_providers.*]` 줄을 지우고 다시 실행한다. 처음 수정 시 `config.toml.ccgw-backup`이 남는다.
+- `model`이 없으면 카탈로그 기본값을 넣고, 이미 있으면 유지한다(계정에 없으면 경고만).
+
+#### 3. Claude 전역 연결 (`~/.claude/settings.json`)
+
+토큰을 화면·로그에 출력하지 않고 병합한다:
+
+```powershell
+$vals = @{}
+ccgw env claude --shell powershell | ForEach-Object { if ($_ -match '^\$env:(\w+) = ''(.*)''$') { $vals[$Matches[1]] = $Matches[2] } }
+$d = (ccgw models | Select-String 'Defaults:').Line
+if ($d -match 'ccp (\S+)')          { $vals.ANTHROPIC_MODEL = $Matches[1] }
+if ($d -match 'opus (\S+?)[,)]')    { if ($Matches[1] -ne '-') { $vals.ANTHROPIC_DEFAULT_OPUS_MODEL = $Matches[1] } }
+if ($d -match 'sonnet (\S+?)[,)]')  { if ($Matches[1] -ne '-') { $vals.ANTHROPIC_DEFAULT_SONNET_MODEL = $Matches[1] } }
+if ($d -match 'haiku (\S+?)[,)]')   { if ($Matches[1] -ne '-') { $vals.ANTHROPIC_DEFAULT_HAIKU_MODEL = $Matches[1]; $vals.ANTHROPIC_SMALL_FAST_MODEL = $Matches[1] } }
+$f = "$HOME\.claude\settings.json"; New-Item -ItemType Directory -Force (Split-Path $f) | Out-Null
+$s = if (Test-Path $f) { Copy-Item $f "$f.ccgw-backup"; Get-Content $f -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+if (-not $s.env) { $s | Add-Member env ([pscustomobject]@{}) -Force }
+foreach ($k in $vals.Keys) { $s.env | Add-Member $k $vals[$k] -Force }
+$s | ConvertTo-Json -Depth 20 | Set-Content $f -Encoding utf8
+```
+
+- **확인**: `claude -p "reply only OK"`가 `OK`. 계정에 없는 계열(`-`)은 넣지 않는다(다른 계열로 대체 금지).
+- 마스터키(`<data>/.env`)를 다시 만들면 이 단계를 다시 실행한다.
+
+#### 4. Orca 명령을 기본값으로
+
+- 사용자가 할 때: Orca **Settings → Agents**에서 Claude·Codex의 **Command** 칸을 비우고(기본값 `claude`/`codex`), Orca를 **완전히 종료 후 재실행**.
+- 에이전트가 할 때(Orca CLI 없이): Orca가 실행 중이면 DB가 덮어써지므로 **반드시 Orca를 완전히 종료**한 뒤 진행한다.
+  - 파일: Windows `%APPDATA%\orca\profiles\local-default\profile-state.db` (SQLite, 먼저 백업).
+  - 테이블 `profile_state_documents`의 `domain='settings'` 행 `payload`(JSON)에서 `agentCmdOverrides`의 `codex`·`claude` 키를 지운다.
+  - 같은 행의 `content_hash`를 새 payload(UTF-8, `separators=(',',':')`, `ensure_ascii=False`)의 **sha256 hex**로, `revision`을 +1, `updated_at`을 현재 epoch ms로 갱신한다. hash가 틀리면 Orca가 행을 거부할 수 있다.
+  - Orca를 다시 실행하고 같은 값을 다시 읽어 `agentCmdOverrides`에 codex/claude가 없는지 확인한다.
+- Orca의 모델 목록 캐시(`%APPDATA%\orca\agent-model-catalog.db`)는 설정 지문 기준이라 손댈 필요 없다.
+- **확인**: Orca에서 새 Codex 채팅을 열면 선택기에 GPT-6.2 Astra·Claude·Gemini 등이 보이고 응답이 온다. 기존 채팅도 이어진다.
+
+#### 문제 해결
+
+| 증상 | 원인 · 조치 |
+|---|---|
+| `no rollout found for thread id …` | Orca Command가 `ccx …`라 별도 `CODEX_HOME`(`<data>/codex`)을 써서 기존 채팅을 못 찾는다. 4단계로 기본값 복구. Orca에서 `ccx`를 쓰지 않는다. |
+| Orca 선택기에 새 모델이 없음 | `ccgw refresh` 후 Orca 새 채팅. 그래도 없으면 `codex debug models`로 카탈로그 확인, `ccgw codex-setup` 재실행. |
+| `selector_not_found` / Codex 시작 실패 | 게이트웨이 꺼짐(`ccgw status`) 또는 Command에 남은 `ccx`/`ccp`. `ccgw start; ccgw start codex` 후 Orca 재시작. |
+| Code Mode host 없음 | 1단계의 Codex 0.167.1+ 수동 설치. |
+| Claude 401/연결 실패 | 3단계 재실행(마스터키 변경) 또는 claude 서비스 기동. |
+
+- 부팅 후에는 `ccgw start; ccgw start codex`를 한 번 실행해야 전역 `codex`/`claude`가 동작한다.
+- 되돌리기: `config.toml`의 `# >>> ccgw managed` 블록 삭제(또는 `config.toml.ccgw-backup` 복원), `settings.json.ccgw-backup` 복원.
+- `ccp`/`ccx --sync-model-picker`는 Orca 밖에서 stdio app-server를 직접 띄울 때만 쓰는 옵션이다(Claude Code 2.1.318·Codex 0.167.0 이상).
 ### 기존 bash 버전에서 이전
 
 예전 `~/litellm-copilot-gateway/*.sh`는 새 명령으로 넘겨주는 얇은 shim으로 남아 있어 기존 알리아스(`ccp=…/claude-copilot.sh`)도 동작한다. 새 설치 후에는 알리아스를 지우고 `ccp`/`ccx`/`ccgw`를 직접 쓰면 된다.
