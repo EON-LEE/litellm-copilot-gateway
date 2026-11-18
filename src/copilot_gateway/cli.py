@@ -81,6 +81,10 @@ def cmd_refresh(settings, args):
         print(f"{target:<7} {'updated' if changed[target] else 'unchanged':<9} {len(rows)} models  {path}{note}")
     if settings.exclude_models:
         print("excluded (CCGW_EXCLUDE_MODELS): " + ", ".join(sorted(settings.exclude_models)))
+    from .clients import codex_catalog
+    note = codex_catalog.refresh_if_installed(settings)
+    if note:
+        print(note)
     if restart:
         print("Apply with: ccgw restart " + " ".join(restart))
     return 0
@@ -259,6 +263,28 @@ def cmd_setup(settings, args):
     return cmd_refresh(settings, args)
 
 
+def cmd_codex_setup(settings, args):
+    """Point the global Codex (~/.codex, used by plain `codex` and Orca) at the gateway."""
+    from .clients import codex, codex_catalog
+    gateway.ensure(settings, ["codex"], log=print)
+    executable = codex.find_codex()
+    if not executable:
+        raise services.ServiceError("Codex not found; install it first (see README)")
+    codex_catalog.write_catalog(settings, executable)
+    models = len(catalog.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))["model_list"])
+    print(f"codex catalog  {models} account models -> {codex_catalog.catalog_path(settings)}")
+    path = codex_catalog.write_global_config(settings)
+    print(f"codex config   {path} (provider {codex_catalog.PROVIDER}, model_catalog_json)")
+    model = codex_catalog.saved_global_model(path.parent)
+    config = catalog.parse_rendered(settings.codex_config.read_text(encoding="utf-8"))
+    served = {row["model_name"] for row in config["model_list"]}
+    if model and model not in served:
+        print(f"⚠️  model = \"{model}\" in {path} is not offered by this account; "
+              f"pick another with /model (default: {catalog.codex_default(config)})")
+    print("Restart Codex/Orca (new sessions) to load the model list.")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ccgw", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -268,6 +294,8 @@ def build_parser():
     login.add_argument("--force", action="store_true", help="replace an existing login (e.g. another account)")
     login.set_defaults(func=cmd_login)
     sub.add_parser("refresh", help="regenerate configs from the live Copilot catalog").set_defaults(func=cmd_refresh)
+    sub.add_parser("codex-setup", help="point global ~/.codex (plain `codex`, Orca) at the gateway with this "
+                   "account's model list").set_defaults(func=cmd_codex_setup)
     sub.add_parser("models", help="list Copilot models and token limits").set_defaults(func=cmd_models)
     for name, func, help_text in (("start", cmd_start, "start services (default: capi + claude)"),
                                   ("restart", cmd_restart, "restart LiteLLM instances (config reload)")):

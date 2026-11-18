@@ -22,6 +22,11 @@ def refresh_catalog():
     if any(changed.values()):
         print("ccgw hot-reload: catalog changed: " + ", ".join(name for name, value in changed.items() if value),
               file=sys.stderr, flush=True)
+    if changed.get("codex"):
+        from .clients import codex_catalog
+        note = codex_catalog.refresh_if_installed(Settings.load())
+        if note:
+            print("ccgw hot-reload: " + note, file=sys.stderr, flush=True)
 
 
 def install_hot_reload(config, state, refresh_minutes):
