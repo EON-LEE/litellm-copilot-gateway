@@ -332,5 +332,56 @@ class PickerClientTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["env"], {"CODEX_HOME": "isolated"})
 
 
+class CodexCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.value, self.config, self.normal, self.bundled = sources()
+
+    def test_lists_only_account_models_and_keeps_bundled_metadata(self):
+        from copilot_gateway.clients import codex_catalog
+        self.bundled["models"][1]["base_instructions"] = "bundled prompt"
+        result = codex_catalog.build_catalog(self.config, self.normal, self.bundled, "default prompt")["models"]
+        listed = [entry["slug"] for entry in result if entry["visibility"] == "list"]
+        self.assertEqual(listed, [row["model_name"] for row in self.config["model_list"]])
+        by_slug = {entry["slug"]: entry for entry in result}
+        self.assertEqual(by_slug["gpt-6-astra"]["visibility"], "hide")
+        sol = by_slug["gpt-6.1-sol"]
+        self.assertEqual(sol["base_instructions"], "bundled prompt")
+        self.assertEqual([level["effort"] for level in sol["supported_reasoning_levels"]], ["low", "high"])
+        self.assertEqual(sol["default_reasoning_level"], "low")
+        other = by_slug[next(name for name in listed if name != "gpt-6.1-sol")]
+        self.assertEqual(other["base_instructions"], "default prompt")
+        self.assertIsNone(other["default_reasoning_level"])
+        self.assertEqual([entry["priority"] for entry in result if entry["visibility"] == "list"],
+                         list(range(len(listed))))
+
+    def test_global_config_keeps_user_content_and_is_idempotent(self):
+        from copilot_gateway.clients import codex_catalog
+        import tomllib
+        existing = ('model = "gpt-6.1-sol"\n\n[projects."C:\\\\work"]\ntrust_level = "trusted"\n')
+        first = codex_catalog.render_global_config(existing, 24001, "secret", Path("C:/data/cat.json"), "x")
+        parsed = tomllib.loads(first)
+        self.assertEqual(parsed["model"], "gpt-6.1-sol")
+        self.assertEqual(parsed["model_provider"], "copilot_gateway")
+        self.assertEqual(parsed["model_catalog_json"], "C:/data/cat.json")
+        self.assertEqual(parsed["model_providers"]["copilot_gateway"]["base_url"], "http://127.0.0.1:24001/v1")
+        self.assertEqual(parsed["projects"]["C:\\work"]["trust_level"], "trusted")
+        # Codex may append its own tables inside the provider block; they must survive a rewrite.
+        edited = first.replace(codex_catalog.TABLE_END, "\n[tui]\nscreen_reader_detection_done = true\n"
+                               + codex_catalog.TABLE_END)
+        again = codex_catalog.render_global_config(edited, 24001, "secret", Path("C:/data/cat.json"), "x")
+        self.assertTrue(tomllib.loads(again)["tui"]["screen_reader_detection_done"])
+        self.assertEqual(codex_catalog.render_global_config(again, 24001, "secret", Path("C:/data/cat.json"), "x"),
+                         again)
+        self.assertEqual(tomllib.loads(codex_catalog.render_global_config(
+            "", 24001, "secret", Path("C:/data/cat.json"), "gpt-x"))["model"], "gpt-x")
+
+    def test_global_config_rejects_unmanaged_provider_settings(self):
+        from copilot_gateway.clients import codex_catalog
+        for text in ('model_provider = "openai"\n', 'model_catalog_json = "x"\n',
+                     '[model_providers.copilot_gateway]\nname = "x"\n'):
+            with self.subTest(text=text), self.assertRaises(services.ServiceError):
+                codex_catalog.render_global_config(text, 24001, "k", Path("cat.json"), "x")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -104,16 +104,10 @@ def _index_models(payload, array_name, id_name):
     return result
 
 
-def codex_picker(config, copilot_payload, bundled_payload, default=None):
-    """Build app-server picker entries without changing Codex's model execution metadata."""
+def account_models(config, copilot_payload):
+    """(model id, display info, copilot-api row, capability support, reasoning efforts) per served model."""
     copilot = _index_models(copilot_payload, "data", "id")
-    bundled = _index_models(bundled_payload, "models", "slug")
-    aliases = config["router_settings"]["model_group_alias"]
-    default = aliases.get(default, {}).get("model", default)
-    served = {row["model_name"] for row in config["model_list"]}
-    if default not in served:
-        default = catalog.codex_default(config)
-    selected = []
+    rows = []
     for row in config["model_list"]:
         model_id, info = row["model_name"], row["model_info"]
         # copilot-api exposes Claude IDs with the same model's dots normalized to hyphens.
@@ -134,13 +128,32 @@ def codex_picker(config, copilot_payload, bundled_payload, default=None):
         effort = support.get("reasoning_effort", [])
         if not isinstance(effort, list) or not all(isinstance(value, str) for value in effort):
             raise services.ServiceError(f"invalid reasoning capability for {model_id}")
+        rows.append((model_id, info, raw, support, effort))
+    return rows
+
+
+def bundled_levels(original, model_id, effort):
+    """The bundled Codex reasoning levels this Copilot model accepts."""
+    levels = original.get("supported_reasoning_levels")
+    if not isinstance(levels, list) or not all(isinstance(level, dict) for level in levels):
+        raise services.ServiceError(f"invalid Codex reasoning metadata for {model_id}")
+    return [level for level in levels if level.get("effort") in effort]
+
+
+def codex_picker(config, copilot_payload, bundled_payload, default=None):
+    """Build app-server picker entries without changing Codex's model execution metadata."""
+    bundled = _index_models(bundled_payload, "models", "slug")
+    aliases = config["router_settings"]["model_group_alias"]
+    default = aliases.get(default, {}).get("model", default)
+    served = {row["model_name"] for row in config["model_list"]}
+    if default not in served:
+        default = catalog.codex_default(config)
+    selected = []
+    for model_id, info, _raw, support, effort in account_models(config, copilot_payload):
         original = bundled.get(model_id)
         if original:
-            levels = original.get("supported_reasoning_levels")
-            if not isinstance(levels, list) or not all(isinstance(level, dict) for level in levels):
-                raise services.ServiceError(f"invalid Codex reasoning metadata for {model_id}")
             levels = [{"reasoningEffort": level["effort"], "description": level.get("description", "")}
-                      for level in levels if level.get("effort") in effort]
+                      for level in bundled_levels(original, model_id, effort)]
             default_effort = original.get("default_reasoning_level")
         else:
             levels = [{"reasoningEffort": level, "description": f"{level.capitalize()} reasoning"}
